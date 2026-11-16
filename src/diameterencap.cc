@@ -55,11 +55,11 @@ int DiameterEncap::configure(Vector<String> &conf, ErrorHandler *errh)
 
 Packet* DiameterEncap::simple_action(Packet * p_in)
 {
-    dh.setHbh(rand());
-    dh.setE2e(rand());
-    dh.setLength(p_in->length());
+	dh.setHbh(rand());
+	dh.setE2e(rand());
+	dh.setLength(DIAMETER_MESSAGE_HEADER_LENGTH + p_in->length());
 
-	WritablePacket* wp = p_in->push(20);
+	WritablePacket* wp = p_in->push(DIAMETER_MESSAGE_HEADER_LENGTH);
 	dh.encode(wp->data());
 
 	return wp;
