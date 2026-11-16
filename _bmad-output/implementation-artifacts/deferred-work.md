@@ -1,9 +1,11 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-ci-github-actions-build-and-test.md`
   summary: The smoke configs are judged only by exit status, so a wrong-bytes regression in any covered element still goes green.
   evidence: `tests/run.sh:26-37` branches on `rc` alone and every `tests/configs/*.click` ends in `Print(...) -> Discard;` with no assertion, so changing the AVP length field or leaving the R bit set would still exit 0. Closing it means output assertions in `tests/`, which this spec freezes.
+  resolution: Done — PR #2 (`95f494d`). `tests/smoke.bats` asserts the label, packet length and hex bytes of all six configs under bats-core; `tests/run.sh` retired. `avp-roundtrip`'s expectation is F-7's unpadded output and says so, so story 1-3 updates it.
 - source_spec: `_bmad-output/implementation-artifacts/spec-ci-github-actions-build-and-test.md`
   summary: The workflow offers no manual dispatch inputs, so a Click ref cannot be pinned to bisect an upstream break.
   evidence: `workflow_dispatch` is declared with no `inputs`; the Click revision comes from `refs/heads/master` in the resolve step.
+  resolution: Closed, will not be implemented (2026-11-16) — runs always build the latest Click master; pinning a ref to bisect upstream is deliberately out of scope, so a dispatch run is just a manual re-run of the master build. No workflow change.
 - source_spec: `_bmad-output/implementation-artifacts/spec-ci-github-actions-build-and-test.md`
   summary: Nothing runs the workflow on a schedule, so a Click master break surfaces only when someone opens a PR.
   evidence: Triggers are `pull_request`, `push` to `master` and `workflow_dispatch`; upstream Click last moved in 2022, so a quiet week hides a break indefinitely.
