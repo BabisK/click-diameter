@@ -1,1 +1,5 @@
+# LF in the repository and in a Linux checkout; CRLF in a Windows worktree,
+# whose git config decides the checkout side. Do not narrow this with eol=lf:
+# Linux builds are made from an exported tree (see AGENTS.md), and a CRLF
+# Windows worktree is intended, not a defect.
 * text=auto
