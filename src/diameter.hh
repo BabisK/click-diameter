@@ -322,9 +322,11 @@ inline DiameterCheck diameter_check_header(const uint8_t *buffer, uint32_t lengt
 // Checks one AVP at buffer[0..length): the V bit decides whether its header is
 // 8 or 12 octets, the header must fit, and the declared length must be at least
 // that header and at most the octets available. Padding is not required here: a
-// standalone AVP may arrive unpadded until F-7 lands, and the message walk
-// applies its own padded bound. On success *header_length is the header size
-// and *avp_length the declared length.
+// standalone AVP may legitimately arrive without its zero pad, because the pad
+// belongs to the message a receiver walks, not to the AVP's own Length. The
+// decoder strips only what Length says, and the message walk applies its own
+// padded bound. On success *header_length is the header size and *avp_length
+// the declared length.
 inline DiameterCheck diameter_check_avp(const uint8_t *buffer, uint32_t length,
 		uint32_t *header_length, uint32_t *avp_length)
 {

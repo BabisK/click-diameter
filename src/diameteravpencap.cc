@@ -6,6 +6,7 @@
 #include <click/config.h>
 #include "diameteravpencap.hh"
 #include <click/args.hh>
+#include <click/glue.hh>
 CLICK_DECLS
 
 DiameterAvpEncap::DiameterAvpEncap(){}
@@ -41,9 +42,19 @@ int DiameterAvpEncap::configure(Vector<String> &conf, ErrorHandler *errh)
 
 Packet* DiameterAvpEncap::simple_action(Packet * p_in)
 {
-	uint32_t avpHeaderLength = ah.getVendorSpecific() ? 12 : 8;
-	ah.setLength(avpHeaderLength + p_in->length());
-	WritablePacket* wp = p_in->push(avpHeaderLength);
+	// RFC 6733 section 4.1: the AVP Length counts the header and the value but
+	// not the zero octets that pad the AVP up to a 4-octet boundary.
+	const uint32_t valueLength = p_in->length();
+	ah.setLength(ah.getHeaderLength() + valueLength);
+	const uint32_t paddingLength = ah.getLengthPadded() - ah.getLength();
+
+	WritablePacket* wp = p_in->push(ah.getHeaderLength());
+	if (paddingLength > 0)
+	{
+		wp = wp->put(paddingLength);
+		memset(wp->data() + ah.getHeaderLength() + valueLength, 0,
+				paddingLength);
+	}
 	ah.encode(wp->data());
 
 	return wp;

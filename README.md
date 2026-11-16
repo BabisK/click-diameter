@@ -163,8 +163,8 @@ Element reference
 | `DiameterPopAVP` | 1/1 | — | Removes the last AVP and updates the message Length |
 | `DiameterPopStorePushAVP` | 1/2 | — | Pops the last AVP from one packet (output 0) and pushes that value back onto the next (output 1) |
 | `DiameterFlipRequest` | 1/1 | — | Toggles the request bit, turning a request into an answer and back |
-| `DiameterAvpEncap` | 1/1 | `CODE` (required); `VENDORID`, `MANDATORY` | Prepends an AVP header (8 bytes, or 12 with `VENDORID`) to the packet |
-| `DiameterAvpDecap` | 1/1 | — | Strips the AVP header (8 or 12 bytes, following the V bit) |
+| `DiameterAvpEncap` | 1/1 | `CODE` (required); `VENDORID`, `MANDATORY` | Prepends an AVP header (8 bytes, or 12 with `VENDORID`) and pads the AVP to a 4-octet boundary |
+| `DiameterAvpDecap` | 1/1 | — | Strips one AVP: consumes the AVP whole when octets follow it, otherwise forwards its value (header 8 bytes, or 12 following the V bit; padding dropped either way) |
 
 Tests
 -----
@@ -175,11 +175,9 @@ CLICK=$HOME/click/bin/click bats --tap tests   # this package installed there
 ```
 
 `tests/smoke.bats` runs each config under `tests/configs/` and asserts its exact
-output. `tests/known-defects/` holds handwritten reproductions for the defects
-below; they emit wrong bytes on purpose and are run by hand, not by the suite.
-The `malformed-*` configs in the suite assert the drop path instead — exit 0,
-one warning naming the element and reason, and no `Print` line. CI runs the
-same command on every pull request plus a monthly check against upstream Click
+output. The `malformed-*` configs assert the drop path instead — exit 0, one
+warning naming the element and reason, and no `Print` line. CI runs the same
+command on every pull request plus a monthly check against upstream Click
 master.
 
 Malformed input is dropped, never forwarded. The six elements that read a
@@ -187,9 +185,14 @@ received frame — `DiameterDecap`, `DiameterAvpDecap`, `DiameterFlipRequest`,
 `DiameterPushAVP`, `DiameterPopAVP` and `DiameterPopStorePushAVP` — validate it
 first and drop it with one `ELEMENT: dropping malformed packet: REASON` line
 per packet. Drops are not throttled: a hostile source can flood the log, and
-that is accepted. Until F-7 pads them, AVPs from `DiameterAvpEncap` carry no
-4-octet padding, so a message whose last AVP came from that element fails the
-message checks and is dropped.
+that is accepted.
+
+AVPs are padded to a 4-octet boundary with zero octets, and the AVP Length
+counts only the header and the value (RFC 6733 §4.1). `DiameterAvpEncap` adds
+that padding and `DiameterAvpDecap` derives it from Length and strips it, so a
+message built from the encoder's output passes the message readers and a
+sequence of AVPs stays aligned. A standalone AVP that arrives without its
+padding still decodes to its value rather than being dropped.
 
 Known limitations
 -----------------
@@ -197,13 +200,9 @@ Known limitations
 These elements are not yet RFC-clean in every path. The defects a user hits
 first are listed here; each has a file-and-line description and a reproduction
 in `_bmad-output/specs/spec-diameter-package-hardening/findings.md`. The smoke
-tests assert today's bytes — including the wrong ones — while the
-`malformed-*` tests assert the drop path, so a fix changes a test expectation
-rather than passing silently.
+tests assert today's bytes and the `malformed-*` tests assert the drop path, so
+a fix changes a test expectation rather than passing silently.
 
-- **AVPs are not padded to 4 octets (F-7).** An 8-byte header plus a 5-byte
-  value produces 13 bytes where RFC 6733 requires 16, and decoders do not strip
-  padding.
 - **Flag policy is not enforced (F-5, F-10).** RFC 6733 §3 forbids P on an
   answer, yet `DiameterEncap` accepts any flag combination and
   `DiameterFlipRequest` leaves P as it found it, so an answer can keep P. Flags
@@ -217,7 +216,7 @@ Layout
 
     configure.ac, Makefile.in   build entry points (autoconf, configure, make run here)
     src/                        element sources: one .cc/.hh pair per element, plus diameter.hh
-    tests/                      smoke configs, assertions and defect reproductions
+    tests/                      smoke configs and byte-level assertions
 
 License
 -------
