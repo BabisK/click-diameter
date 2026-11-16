@@ -55,27 +55,35 @@ void DiameterPopStorePushAVP::push(int, Packet* p)
 
 Packet* DiameterPopStorePushAVP::simple_action(Packet * p_in)
 {
-	DiameterHeader dh;
-	AvpHeader tah;
-	dh.decode(p_in->data());
-
-	const uint8_t* nextAvp = p_in->data() + 20;
-	while(nextAvp < p_in->data() + dh.getLength())
+	uint32_t lastAvpOffset;
+	DiameterCheck check = diameter_check_message(p_in->data(), p_in->length(),
+			&lastAvpOffset);
+	if (check != DIAMETER_CHECK_OK)
 	{
-		tah.decode(nextAvp);
-		nextAvp += tah.getLengthPadded();
+		click_chatter("%s: dropping malformed packet: %s", class_name(),
+				diameter_check_reason(check));
+		p_in->kill();
+		return 0;
 	}
 
+	DiameterHeader dh;
+	dh.decode(p_in->data());
+	const uint32_t messageLength = dh.getLength();
 	WritablePacket* wp;
 
 	if(data == NULL)
 	{
-		nextAvp -= tah.getLengthPadded();
-		ah.decode(nextAvp);
-		uint32_t headerLength = ah.getVendorSpecific() ? 12 : 8;
+		// A message with no AVPs stores nothing; forward it unchanged.
+		if (!lastAvpOffset)
+		{
+			return p_in;
+		}
+		const uint8_t* lastAvp = p_in->data() + lastAvpOffset;
+		ah.decode(lastAvp);
+		uint32_t headerLength = ah.getHeaderLength();
 		data = new uint8_t[ah.getLength() - headerLength];
-		memcpy(data, nextAvp + headerLength, ah.getLengthPadded() - headerLength);
-		dh.setLength(dh.getLength() - ah.getLengthPadded());
+		memcpy(data, lastAvp + headerLength, ah.getLength() - headerLength);
+		dh.setLength(messageLength - ah.getLengthPadded());
 		p_in->take(ah.getLengthPadded());
 		wp = p_in->put(0);
 		dh.encode(wp->data());
@@ -83,11 +91,11 @@ Packet* DiameterPopStorePushAVP::simple_action(Packet * p_in)
 	else
 	{
 		wp = p_in->put(ah.getLengthPadded());
-		memset(wp->data() + dh.getLength(), 0, ah.getLengthPadded());
-		ah.encode(wp->data() + dh.getLength());
-		uint32_t headerLength = ah.getVendorSpecific() ? 12 : 8;
-		memcpy(wp->data() + dh.getLength() + headerLength, data, ah.getLength() - headerLength);
-		dh.setLength(dh.getLength() + ah.getLengthPadded());
+		memset(wp->data() + messageLength, 0, ah.getLengthPadded());
+		ah.encode(wp->data() + messageLength);
+		uint32_t headerLength = ah.getHeaderLength();
+		memcpy(wp->data() + messageLength + headerLength, data, ah.getLength() - headerLength);
+		dh.setLength(messageLength + ah.getLengthPadded());
 		dh.encode(wp->data());
 		delete[] data;
 		data = NULL;
