@@ -51,8 +51,8 @@ expect_drop() {
 @test "push-avp-rand: generated value, 8 characters" {
 	run_click push-avp-rand.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
-	local generated='^push-avp-rand: +36 \| 01000024 80000118 00000000 00000001 00000002 00000108 00000010 [0-9a-f]{8} [0-9a-f]{8}$'
-	[[ "$output" =~ $generated ]] || { echo "expected: 36 bytes, AVP length 16, 8 generated characters"; return 1; }
+	local generated='^push-avp-rand: +36 \| 01000024 80000118 00000000 00000001 00000002 00000108 00000010 (3[0-9]|4[1-9a-f]|5[0-9a]|6[1-9a-f]|7[0-9a]){4} (3[0-9]|4[1-9a-f]|5[0-9a]|6[1-9a-f]|7[0-9a]){4}$'
+	[[ "$output" =~ $generated ]] || { echo "expected: 36 bytes, AVP length 16, 8 generated alphanumeric characters"; return 1; }
 }
 
 @test "rand-alphanum-one: one generated character, AVP Length 9" {
@@ -76,24 +76,36 @@ expect_drop() {
 	run_click rand-hex-alphabet.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
 	# F-9: Print renders the value as hex octets, so a literal G appears as 47
-	# and a text search for G would prove nothing. Decode the 10,000 value octets
-	# and check each one against 0-9 / A-F. Appending 10 KB to a 2 KB packet
-	# makes Click chatter about the expensive put, so keep only the Print line.
-	local printed
+	# and a text search for G would prove nothing. Decode the 10,000 value octets,
+	# check each one against 0-9 / A-F, and confirm all 16 symbols appear. The
+	# 10 kB append makes Click print one advisory; any other output is a failure.
+	local printed others
 	printed=$(grep '^rand-hex-alphabet:' <<<"$output")
+	others=$(grep -v '^rand-hex-alphabet:' <<<"$output" | grep -v '^expensive Packet::put' || true)
+	[ -z "$others" ] || { echo "unexpected output beside the Print line: $others"; return 1; }
 	local header='^rand-hex-alphabet: +10028 \| 0100272c 80000118 00000000 00000001 00000002 00000108 00002718 '
 	[[ "$printed" =~ $header ]] || { echo "expected: 10028 octets, AVP Length 10008, message Length 10028"; return 1; }
 	local octets
-	octets=$(tr -d ' \n' <<<"${printed#*|}" | cut -c57-20056)
+	octets=$(tr -d ' \n' <<<"${printed#*00002718 }")
 	[ "${#octets}" -eq 20000 ] || { echo "expected 10,000 value octets, got ${#octets} hex digits"; return 1; }
 	local bad
 	bad=$(awk -v v="$octets" 'BEGIN {
+		n = split("0:30 1:31 2:32 3:33 4:34 5:35 6:36 7:37 8:38 9:39 A:41 B:42 C:43 D:44 E:45 F:46", tbl, " ")
+		for (i = 1; i <= n; i++) {
+			split(tbl[i], kv, ":")
+			pair[kv[1]] = kv[2]
+		}
 		for (i = 1; i <= length(v); i += 2) {
 			o = substr(v, i, 2)
-			if (o !~ /^(3[0-9]|4[1-6])$/) { print o; exit }
+			if (o !~ /^(3[0-9]|4[1-6])$/) { print "invalid octet " o; exit }
+			seen[o] = 1
+		}
+		for (i = 1; i <= n; i++) {
+			split(tbl[i], kv, ":")
+			if (!(pair[kv[1]] in seen)) { print "missing symbol " kv[1]; exit }
 		}
 	}')
-	[ -z "$bad" ] || { echo "generated value contains octet $bad, outside 0-9/A-F"; return 1; }
+	[ -z "$bad" ] || { echo "generated value is not 0-9/A-F: $bad"; return 1; }
 }
 
 @test "rand-num-four: four generated digits, AVP Length 12" {
