@@ -1,37 +1,48 @@
 # tests
 
-Click configs that exercise the package. There is no `make check`; these run
-against an installed Click that already carries `diameter.uo`.
+Click configs that exercise the package, with byte-level assertions. There is
+no `make check`; these run against an installed Click that already carries
+`diameter.uo`.
 
 ## Running
 
+Requires [bats-core](https://github.com/bats-core/bats-core) — on the CI image
+it comes from `apt-get install -y bats`.
+
 ```sh
-tests/run.sh                 # click from PATH
-tests/run.sh ~/click/bin/click
+bats --tap tests                              # click from PATH
+CLICK=~/click/bin/click bats --tap tests      # explicit binary
+CLICK=~/click/bin/click bats --tap --filter pop-avp tests   # one config
 ```
 
-`run.sh` runs everything under `configs/` with a 10 s timeout and exits nonzero
-if any config fails.
+`smoke.bats` runs every config under `configs/` with a 10 s timeout, then
+asserts the exact bytes the config printed: label, packet length and hex
+contents. A wrong length field, a changed flag or an off-by-one is a failed
+test, not a silent pass.
 
 ## configs/
 
-Behavior that must keep working. Every config exits 0 today:
+Behavior that must keep working. Each config has one test in `smoke.bats`:
 
 | Config | Covers |
 |---|---|
 | `push-avp.click` | appending an AVP, header length updated |
+| `push-avp-rand.click` | generated value, 8 characters |
 | `pop-avp.click` | removing the last AVP from a two-AVP message |
 | `avp-roundtrip.click` | `DiameterAvpEncap` then `DiameterAvpDecap` returns the payload |
 | `flip-request.click` | request bit cleared on a request |
 | `decap.click` | stripping the 20-byte header leaves the payload |
-| `push-avp-rand.click` | generated value, 8 characters |
+
+Expectations record today's bytes. One of them is the known-defect behavior
+itself — `avp-roundtrip` emits 13 unpadded bytes (F-7) — and the test says so,
+so the story that fixes the defect updates the expectation with the fix.
 
 ## known-defects/
 
 Reproductions for defects still open in
 `_bmad-output/specs/spec-diameter-package-hardening/findings.md`. They are not
-part of `run.sh` because they abort, hang, or emit wrong bytes on purpose. Run
-one by hand with a timeout:
+part of `smoke.bats` because they abort, hang, or emit wrong bytes on purpose.
+Run one by hand with a timeout:
 
 ```sh
 timeout 10 click tests/known-defects/f2-popavp-zero-length.click
