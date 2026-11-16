@@ -13,6 +13,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-ci-github-actions-build-and-test.md`
   summary: No failure diagnostics are printed, so a red run does not show the resolved Click commit, the cache-hit value or the toolchain.
   evidence: The workflow has no `if: failure()` step and no job summary; diagnosing an upstream Click break means reading the resolve and build logs by hand.
+  resolution: Done — an `if: failure()` step writes a job summary naming the failing stage, the resolved Click commit, hit or miss for the Click cache, the installed Click version and the toolchain. The stage row is there because the first triage question is whether upstream Click broke or the package did. Absent on a timeout or manual cancel, where the job is cancelled rather than failed.
 - source_spec: `_bmad-output/implementation-artifacts/spec-ci-github-actions-build-and-test.md`
   summary: actionlint runs only as a manual verification command, not as a CI job, so a future workflow edit can regress the YAML unnoticed.
   evidence: Verification pins `rhysd/actionlint:1.7.12` but nothing in `.github/workflows/` runs it; the label `ubuntu-26.04` is unknown to that release, so a CI job would need `-ignore ubuntu-26.04` until actionlint catches up.
