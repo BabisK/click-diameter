@@ -31,7 +31,7 @@ baseline_revision: '661e82b2f57c381d6e568db5d5e7e715916b89b6'
 |----------|--------------|---------------------------|----------------|
 | ALNUM_ONE | 20-octet request through `DiameterPushAVP(CODE 264, RANDALPHANUMSTRING 1)` | 32 octets: `01000020 80000118 00000000 00000001 00000002 00000108 00000009 <ch> 000000` — AVP Length 9, one character, three zero pad octets | No error expected |
 | ALNUM_EIGHT | Same header, `RANDALPHANUMSTRING 8` | 36 octets, AVP Length `00000010`, 8 characters, no padding | No error expected |
-| HEX_ALPHABET | Same header, `RANDHEXSTRING 10000` | 10,020 octets; every one of the 10,000 value octets is in `0`-`9` or `A`-`F`; AVP Length `00002718`, message Length `00002724` | No error expected |
+| HEX_ALPHABET | Same header, `RANDHEXSTRING 10000` | 10,028 octets; every one of the 10,000 value octets is in `0`-`9` or `A`-`F`; AVP Length `00002718`, message Length `0000272c` | No error expected |
 | HEX_ONE | `RANDHEXSTRING 1` | AVP Length 9: exactly one character, never an empty AVP | No error expected |
 | OTHER_GENERATORS | `RANDNUMSTRING 4`, `RANDALPHASTRING 4` | 12-octet AVP each, 4 characters from `0`-`9` and from the ASCII letters | No error expected |
 
@@ -60,7 +60,7 @@ baseline_revision: '661e82b2f57c381d6e568db5d5e7e715916b89b6'
 **Acceptance Criteria:**
 - Given a 20-octet request, when `DiameterPushAVP(CODE 264, RANDALPHANUMSTRING 1)` runs, then the packet is 32 octets with AVP Length `00000009` and one character followed by three zero pad octets (CAP-4, F-8).
 - Given `RANDALPHANUMSTRING 8`, when the element runs, then the packet is 36 octets with AVP Length `00000010` and eight characters (CAP-4).
-- Given `RANDHEXSTRING 10000`, when the element runs, then all 10,000 value octets are in `0`-`9`/`A`-`F` and the message is 10,020 octets (CAP-4, F-9).
+- Given `RANDHEXSTRING 10000`, when the element runs, then all 10,000 value octets are in `0`-`9`/`A`-`F` and the message is 10,028 octets (CAP-4, F-9).
 - Given `RANDHEXSTRING 1`, when the element runs, then the AVP Length is 9 rather than 8.
 - Given `RANDNUMSTRING 4` and `RANDALPHASTRING 4`, when both run, then each appends a 12-octet AVP with four characters from its own alphabet.
 - Given the package on Click master, when built at `-Wall -Wextra` and `bats --tap tests` runs, then zero warnings and every test passes, including the unchanged `push-avp-rand` expectation.
@@ -77,6 +77,9 @@ baseline_revision: '661e82b2f57c381d6e568db5d5e7e715916b89b6'
   10,028 octets, AVP Length `00002718`, message Length `0000272c`, 10,000 value
   octets — since the AVP Length and the 10,000-character count are the point of
   the row and the totals follow from the writer at `src/diameterpushavp.cc:144-171`.
+  The matrix row and the third acceptance criterion were amended to 10,028
+  octets / `0000272c` at implementation time, so the contract, the code and the
+  test now agree.
 
 ## Review Triage Log
 

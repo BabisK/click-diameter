@@ -21,8 +21,11 @@ wrong length field, a changed flag or an off-by-one is a failed test, not a
 silent pass. The octets that are deliberately random — the `hbh`/`e2e`
 identifiers of F-11 — are matched with a regex instead of pinned, and the
 `encap` test runs its config a second time to check that every other field comes
-back byte for byte. The `malformed-*` configs assert the drop path instead:
-exit 0, no `Print` line, and exactly one warning naming the element and reason.
+back byte for byte. The `rand-*` tests pin the length and the alphabet of each
+`DiameterPushAVP` generator; one of them appends 10 kB to the packet, so Click
+prints its `expensive Packet::put` advisory beside the `Print` line. The
+`malformed-*` configs assert the drop path instead: exit 0, no `Print` line,
+and exactly one warning naming the element and reason.
 
 Malformed input is dropped, never forwarded. A drop is asserted with
 `expect_drop`, which requires exit 0, exactly one warning of the form
