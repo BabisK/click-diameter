@@ -129,9 +129,11 @@ InfiniteSource(DATA \<01 00 00 14 80 00 01 10 00 00 00 04 00 00 00 01
 message:   36 | 01000024 80000110 00000004 00000001 00000002 00000108 0000000d 68656c6c 6f000000
 ```
 
-The value can also come from a number (`UINT32`) or from a generator
-(`RANDALPHANUMSTRING 8`, `RANDNUMSTRING`, `RANDALPHASTRING`, `RANDHEXSTRING`,
-`RANDUINT32`).
+The value can also come from a number (`UINT32` or `RANDUINT32`) or from a
+generator that emits exactly N characters from a fixed alphabet:
+`RANDALPHANUMSTRING N` (`0`-`9`, `A`-`Z`, `a`-`z`), `RANDNUMSTRING N` (`0`-`9`),
+`RANDALPHASTRING N` (`A`-`Z`, `a`-`z`) and `RANDHEXSTRING N` (`0`-`9`, `A`-`F`,
+upper case).
 
 ### Turn a request into an answer
 
@@ -208,8 +210,6 @@ a fix changes a test expectation rather than passing silently.
   `DiameterFlipRequest` leaves P as it found it, so an answer can keep P. Flags
   start clear now that every header is initialized, but nothing checks what a
   caller then sets.
-- **`RANDALPHANUMSTRING 1` yields an empty AVP (F-8)** and the hex generator can
-  emit `G`/`g` (F-9).
 
 Layout
 ------

@@ -41,6 +41,11 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 |---|---|
 | `push-avp.click` | appending an AVP, header length updated |
 | `push-avp-rand.click` | generated value, 8 characters |
+| `rand-alphanum-one.click` | `RANDALPHANUMSTRING 1` emits one character: AVP Length 9 and three zero pad octets (F-8) |
+| `rand-hex-one.click` | `RANDHEXSTRING 1` emits one character rather than an empty AVP (F-8) |
+| `rand-hex-alphabet.click` | `RANDHEXSTRING 10000` draws all 10,000 characters from `0`-`9`/`A`-`F` (F-9) |
+| `rand-num-four.click` | `RANDNUMSTRING 4` emits four digits: AVP Length 12 |
+| `rand-alpha-four.click` | `RANDALPHASTRING 4` emits four letters: AVP Length 12 |
 | `pop-avp.click` | removing the last AVP from a two-AVP message |
 | `avp-roundtrip.click` | `DiameterAvpEncap` then `DiameterAvpDecap` returns the payload |
 | `avp-padding.click` | a 5-octet value pads to a 16-octet AVP: Length 13, three zero octets |

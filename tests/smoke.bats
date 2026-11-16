@@ -9,11 +9,12 @@
 # today, so a change in them fails the run. Octets that are deliberately random
 # -- the hbh/e2e identifiers of F-11 -- are matched with a regex instead of
 # compared exactly, and the encap test runs its config a second time to check
-# that every other field comes back byte for byte. The avp-padding* and
-# avp-decap-* tests pin the 4-octet AVP alignment of RFC 6733 section 4.1 and
-# the rule that the decoder derives padding from Length alone. The malformed-*
-# tests assert the drop path instead: exit 0, one warning naming the element and
-# reason, and no Print line.
+# that every other field comes back byte for byte. The rand-* tests pin the
+# length and the alphabet of each DiameterPushAVP generator. The avp-padding*
+# and avp-decap-* tests pin the 4-octet AVP alignment of RFC 6733 section 4.1
+# and the rule that the decoder derives padding from Length alone. The
+# malformed-* tests assert the drop path instead: exit 0, one warning naming the
+# element and reason, and no Print line.
 
 click=${CLICK:-click}
 click_timeout=${CLICK_TIMEOUT:-10}
@@ -52,6 +53,61 @@ expect_drop() {
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
 	local generated='^push-avp-rand: +36 \| 01000024 80000118 00000000 00000001 00000002 00000108 00000010 [0-9a-f]{8} [0-9a-f]{8}$'
 	[[ "$output" =~ $generated ]] || { echo "expected: 36 bytes, AVP length 16, 8 generated characters"; return 1; }
+}
+
+@test "rand-alphanum-one: one generated character, AVP Length 9" {
+	run_click rand-alphanum-one.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# F-8: a count of 1 used to fall through every branch and emit an empty
+	# 8-octet AVP. The one character is followed by three zero pad octets.
+	local expected='^rand-alphanum-one: +32 \| 01000020 80000118 00000000 00000001 00000002 00000108 00000009 (3[0-9]|4[1-9a-f]|5[0-9a]|6[1-9a-f]|7[0-9a])000000$'
+	[[ "$output" =~ $expected ]] || { echo "expected: 32 octets, AVP Length 9, one alphanumeric character and three zero pad octets"; return 1; }
+}
+
+@test "rand-hex-one: one hex character, never an empty AVP" {
+	run_click rand-hex-one.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# F-8 on the hex generator: AVP Length 9, not an 8-octet header-only AVP.
+	local expected='^rand-hex-one: +32 \| 01000020 80000118 00000000 00000001 00000002 00000108 00000009 (3[0-9]|4[1-6])000000$'
+	[[ "$output" =~ $expected ]] || { echo "expected: 32 octets, AVP Length 9, one hex character and three zero pad octets"; return 1; }
+}
+
+@test "rand-hex-alphabet: 10,000 generated characters, all of them hex" {
+	run_click rand-hex-alphabet.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# F-9: Print renders the value as hex octets, so a literal G appears as 47
+	# and a text search for G would prove nothing. Decode the 10,000 value octets
+	# and check each one against 0-9 / A-F. Appending 10 KB to a 2 KB packet
+	# makes Click chatter about the expensive put, so keep only the Print line.
+	local printed
+	printed=$(grep '^rand-hex-alphabet:' <<<"$output")
+	local header='^rand-hex-alphabet: +10028 \| 0100272c 80000118 00000000 00000001 00000002 00000108 00002718 '
+	[[ "$printed" =~ $header ]] || { echo "expected: 10028 octets, AVP Length 10008, message Length 10028"; return 1; }
+	local octets
+	octets=$(tr -d ' \n' <<<"${printed#*|}" | cut -c57-20056)
+	[ "${#octets}" -eq 20000 ] || { echo "expected 10,000 value octets, got ${#octets} hex digits"; return 1; }
+	local bad
+	bad=$(awk -v v="$octets" 'BEGIN {
+		for (i = 1; i <= length(v); i += 2) {
+			o = substr(v, i, 2)
+			if (o !~ /^(3[0-9]|4[1-6])$/) { print o; exit }
+		}
+	}')
+	[ -z "$bad" ] || { echo "generated value contains octet $bad, outside 0-9/A-F"; return 1; }
+}
+
+@test "rand-num-four: four generated digits, AVP Length 12" {
+	run_click rand-num-four.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	local expected='^rand-num-four: +32 \| 01000020 80000118 00000000 00000001 00000002 00000108 0000000c (3[0-9]){4}$'
+	[[ "$output" =~ $expected ]] || { echo "expected: 32 octets, AVP Length 12, four digits from 0-9"; return 1; }
+}
+
+@test "rand-alpha-four: four generated letters, AVP Length 12" {
+	run_click rand-alpha-four.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	local expected='^rand-alpha-four: +32 \| 01000020 80000118 00000000 00000001 00000002 00000108 0000000c (4[1-9a-f]|5[0-9a]|6[1-9a-f]|7[0-9a]){4}$'
+	[[ "$output" =~ $expected ]] || { echo "expected: 32 octets, AVP Length 12, four letters from A-Z/a-z"; return 1; }
 }
 
 @test "pop-avp: removing the last AVP from a two-AVP message" {
