@@ -28,16 +28,18 @@ Packet* DiameterFlipRequest::simple_action(Packet * p_in)
 	dh.decode(wp->data());
 	if (dh.isRequest())
 	{
-		// This package keeps P off the answers it produces (CAP-5): RFC 6733
-		// section 3 forbids E in requests and T in answers, while section 6.2
-		// makes an answer's P mirror the request's, so the rule enforced here
-		// is the package's own.
+		// RFC 6733 section 3 forbids T in an answer. The answer keeps the
+		// request's P, because section 6.2 sets an answer's P "to the same value
+		// as the one in the request".
 		dh.setRequest(false);
-		dh.setProxiable(false);
+		dh.setRetransmitted(false);
 	}
 	else
 	{
+		// RFC 6733 section 3 forbids E in a request; P is mirrored the same way
+		// in this direction, so a proxiable answer yields a proxiable request.
 		dh.setRequest(true);
+		dh.setError(false);
 	}
 	dh.encode(wp->data());
 	return wp;

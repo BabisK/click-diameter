@@ -50,11 +50,17 @@
 - id: "5"
   title: Set request and answer flags per RFC 6733
   description: >-
-    Stop setting E on generated requests, keep P off answers, and clear P when
-    FlipRequest converts a request to an answer. Covers CAP-5 and findings F-5, F-10.
+    Stop setting E on generated requests, mirror P in both flip directions, clear
+    T from every constructed answer, and drop received frames whose flags conflict
+    with the message type. Covers CAP-5 and findings F-5, F-10.
   invoke_dev_with: >-
-    Flipping a request must clear R and force P to 0; generated requests must show
-    E=0. Do not change the flag bit layout or the element argument surface.
+    Flipping a proxiable request must keep P and clear T; flipping an error answer
+    must keep P and clear E; DiameterEncap must reject RETRANSMITED on an answer
+    and ERROR on a request while accepting PROXIABLE on either; and every element
+    that reads a message must drop E-on-request and T-on-answer with one warning.
+    P on either type, E on an answer and T on a request stay legal. Do not change
+    the flag bit layout or the element argument surface. Rule set amended by
+    user direction on 2026-11-16 (spec-rfc-6733-flag-alignment).
 
 - id: "6"
   title: Use Click randomness instead of reseeding the C RNG

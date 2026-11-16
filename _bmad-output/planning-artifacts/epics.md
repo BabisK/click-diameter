@@ -26,7 +26,7 @@ Covers CAP-4 and findings F-8 (`> true` boolean comparison) and F-9 (alphabet re
 
 ### Story 1.5: Set request and answer flags per RFC 6733
 
-Covers CAP-5 and findings F-5 (E set on requests) and F-10 (P left set on answers).
+Covers CAP-5 and findings F-5 (E set on requests) and F-10 (the flip and Encap mishandle P, E and T): P mirrors in both directions, E is cleared from every constructed request, T from every constructed answer, and a received frame carrying E on a request or T on an answer is dropped.
 
 ### Story 1.6: Use Click randomness instead of reseeding the C RNG
 

@@ -27,8 +27,8 @@ A pain to solve, with a correctness mandate behind it. The `click-diameter` pack
   - **intent:** The argument surface produces exactly what the argument names promise, including the requested random string length and a hex alphabet with no out-of-range characters.
   - **success:** `RANDALPHANUMSTRING 1` yields a 9-byte AVP, `RANDALPHANUMSTRING 8` yields 16 bytes of data, and a 10 kB sample contains no `G` or `g`.
 - **CAP-5**
-  - **intent:** Elements that write Diameter flags set them consistently with the message type, so a request never looks like an error and an answer never looks proxiable.
-  - **success:** Flipping a request clears R and forces P to 0, and generated requests show E=0.
+  - **intent:** Elements that write Diameter flags set them consistently with the message type, and elements that read a message reject flags that conflict with its type, so a request never carries E, an answer never carries T, and P mirrors in both directions.
+  - **success:** Flipping a proxiable request keeps P and clears T, flipping an error answer keeps P and clears E, and generated requests show E=0 while generated answers show T=0; a received frame carrying E on a request or T on an answer is dropped with a named warning, while P on either type, E on an answer and T on a request pass through.
 - **CAP-6**
   - **intent:** A run can be reproduced from a seed, because random field generation uses Click randomness instead of reseeding the process-wide C library RNG.
   - **success:** Two runs with the same Click seed produce identical packets, and no element calls `srand` or `rand`.
