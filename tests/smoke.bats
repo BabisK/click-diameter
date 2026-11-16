@@ -14,7 +14,9 @@
 # and avp-decap-* tests pin the 4-octet AVP alignment of RFC 6733 section 4.1
 # and the rule that the decoder derives padding from Length alone. The
 # malformed-* tests assert the drop path instead: exit 0, one warning naming the
-# element and reason, and no Print line.
+# element and reason, and no Print line. The two configs the package refuses --
+# ERROR on a request and PROXIABLE on an answer -- assert the configure path:
+# Click's whole configure-failure output and no Print line.
 
 click=${CLICK:-click}
 click_timeout=${CLICK_TIMEOUT:-10}
@@ -40,6 +42,16 @@ expect_drop() {
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
 	local warning="$1: dropping malformed packet: $2"
 	[ "$output" = "$warning" ] || { echo "expected: $warning"; return 1; }
+}
+
+# expect_configure_failure CONFIG MESSAGE -- a non-zero exit and Click's whole
+# configure-failure output for that config: the config path and line, the
+# element being configured, the named error, and the closing line. A crash, a
+# second error, an extra warning or a packet that reached Print fails the run.
+expect_configure_failure() {
+	[ "$status" -ne 0 ] || { echo "expected a configure failure, click exit $status"; return 1; }
+	local expected="$BATS_TEST_DIRNAME/configs/$1":*": While configuring 'DiameterEncap@2 :: DiameterEncap':"$'\n'"  $2"$'\n'"Router could not be initialized!"
+	[[ "$output" == $expected ]] || { echo "expected: $expected"; echo "got: $output"; return 1; }
 }
 
 @test "push-avp: appending an AVP, header length updated" {
@@ -212,6 +224,24 @@ pop: +20 \| 01000014 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8}$'
 	expect 'flip-request:   20 | 01000014 00000118 00000000 00000001 00000002'
 }
 
+@test "flip-request-p: a proxiable request flips to flags 00, P cleared with R" {
+	run_click flip-request-p.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	expect 'flip-request-p:   20 | 01000014 00000118 00000000 00000001 00000002'
+}
+
+@test "flip-answer: flipping an answer sets R, flags 00 to 80" {
+	run_click flip-answer.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	expect 'flip-answer:   20 | 01000014 80000118 00000000 00000001 00000002'
+}
+
+@test "flip-answer-p: a flipped answer becomes a request and keeps P, flags 40 to c0" {
+	run_click flip-answer-p.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	expect 'flip-answer-p:   20 | 01000014 c0000118 00000000 00000001 00000002'
+}
+
 @test "decap: stripping the 20-byte header leaves the payload" {
 	run_click decap.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
@@ -262,11 +292,51 @@ pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
 	[[ "$output" =~ $expected ]] || { echo "expected: 28, 44 and 28 octets with Lengths 0x1c, 0x2c and 0x1c"; return 1; }
 }
 
+@test "encap-error-on-answer: E is legal on an answer, flags 20" {
+	run_click encap-error-on-answer.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	local expected='^encap-error-on-answer: +24 \| 01000018 20000118 00000000 [0-9a-f]{8} [0-9a-f]{8} deadbeef$'
+	[[ "$output" =~ $expected ]] || { echo "expected: 24 octets, flags 20, code 000118, then the payload"; return 1; }
+}
+
+@test "encap-retransmit-on-request: T is legal on a request and unchecked, flags 90" {
+	run_click encap-retransmit-on-request.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	local expected='^encap-retransmit-on-request: +24 \| 01000018 90000118 00000000 [0-9a-f]{8} [0-9a-f]{8} deadbeef$'
+	[[ "$output" =~ $expected ]] || { echo "expected: 24 octets, flags 90, code 000118, then the payload"; return 1; }
+}
+
+@test "encap-proxiable-on-request: P is legal on a request, flags c0" {
+	run_click encap-proxiable-on-request.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# The accept side of the P guard: a guard that rejected every PROXIABLE use,
+	# or every request, fails here.
+	local expected='^encap-proxiable-on-request: +24 \| 01000018 c0000118 00000000 [0-9a-f]{8} [0-9a-f]{8} deadbeef$'
+	[[ "$output" =~ $expected ]] || { echo "expected: 24 octets, flags c0, code 000118, then the payload"; return 1; }
+}
+
+@test "encap-error-on-request: ERROR on a request fails to configure" {
+	run_click encap-error-on-request.click
+	expect_configure_failure encap-error-on-request.click 'the ERROR argument cannot be set on a request (RFC 6733 section 3)'
+}
+
+@test "encap-proxiable-on-answer: PROXIABLE on an answer fails to configure" {
+	run_click encap-proxiable-on-answer.click
+	expect_configure_failure encap-proxiable-on-answer.click 'the PROXIABLE argument cannot be set on an answer (RFC 6733 section 3)'
+}
+
 @test "rated-source: 20 octets, version 1, Length 20, flags 80, code 000118" {
 	run_click rated-source.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
 	local expected='^rated-source: +20 \| 01000014 80000118 0000002a [0-9a-f]{8} [0-9a-f]{8}$'
 	[[ "$output" =~ $expected ]] || { echo "expected: 20 octets, version 1, Length 20, flags 80, code 000118, App-Id 0000002a"; return 1; }
+}
+
+@test "rated-source-answer: 20 octets, flags 00, E and P clear on an answer" {
+	run_click rated-source-answer.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	local expected='^rated-source-answer: +20 \| 01000014 00000118 0000002a [0-9a-f]{8} [0-9a-f]{8}$'
+	[[ "$output" =~ $expected ]] || { echo "expected: 20 octets, version 1, Length 20, flags 00, code 000118, App-Id 0000002a"; return 1; }
 }
 
 @test "popstorepush-roundtrip: unpadded AVP pop then push restores the message" {

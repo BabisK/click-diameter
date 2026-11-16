@@ -26,7 +26,19 @@ Packet* DiameterFlipRequest::simple_action(Packet * p_in)
 	WritablePacket * wp = p_in->put(0);
 	DiameterHeader dh;
 	dh.decode(wp->data());
-	dh.isRequest() ? dh.setRequest(false) : dh.setRequest(true);
+	if (dh.isRequest())
+	{
+		// This package keeps P off the answers it produces (CAP-5): RFC 6733
+		// section 3 forbids E in requests and T in answers, while section 6.2
+		// makes an answer's P mirror the request's, so the rule enforced here
+		// is the package's own.
+		dh.setRequest(false);
+		dh.setProxiable(false);
+	}
+	else
+	{
+		dh.setRequest(true);
+	}
 	dh.encode(wp->data());
 	return wp;
 }

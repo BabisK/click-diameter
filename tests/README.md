@@ -30,8 +30,15 @@ and exactly one warning naming the element and reason.
 Malformed input is dropped, never forwarded. A drop is asserted with
 `expect_drop`, which requires exit 0, exactly one warning of the form
 `ELEMENT: dropping malformed packet: REASON`, and no `Print` line; a forwarded
-malformed packet or a silent drop fails the run. Drops are not throttled, so a
-hostile source can flood the log; that is accepted.
+malformed packet or a silent drop fails the run. Drops are not throttled, so
+a hostile source can flood the log; that is accepted.
+
+A configuration the package refuses is asserted with `expect_configure_failure`,
+which requires a non-zero exit, Click's whole configure-failure output for that
+config (path and line, the `While configuring` line, the named error, and
+`Router could not be initialized!`), and no `Print` line. Only
+`encap-error-on-request.click` and `encap-proxiable-on-answer.click` take that
+path; every other `encap-*` config configures and prints bytes.
 
 CI runs the same command on every pull request and every push to `master`, plus
 monthly against the latest Click master, so a local pass is the same check.
@@ -63,12 +70,21 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `avp-decap-nonzero-pad.click` | non-zero pad octets do not change the decoded value |
 | `avp-encap-message.click` | Encap then AvpEncap then PopAVP: the encoder's padded AVP passes the message readers |
 | `flip-request.click` | request bit cleared on a request |
+| `flip-request-p.click` | a proxiable request's flags go `c0` to `00`: R and P both clear (F-10) |
+| `flip-answer.click` | an answer's flags go `00` to `80`: R set and no other octet moves |
+| `flip-answer-p.click` | an answer with P set flips to `c0`: R set, P untouched |
 | `decap.click` | stripping the 20-byte header leaves the payload |
 | `encap.click` | a 4-octet payload gets a version 1 header whose Length counts the header plus the payload, 24 octets (F-4) |
 | `encap-empty.click` | a zero-octet packet gets a 20-octet header, version 1 and Length 20 (F-4) |
 | `encap-decap.click` | Encap then Decap forwards the payload instead of dropping it (F-4) |
 | `encap-push-pop.click` | Encap then PushAVP grows a 28-octet frame to 44 and PopAVP restores 28 (F-4) |
+| `encap-error-on-answer.click` | E on an answer is legal and unchecked: flags `20` |
+| `encap-retransmit-on-request.click` | T on a request is legal and unchecked: flags `90` |
+| `encap-proxiable-on-request.click` | P on a request is legal: flags `c0` |
+| `encap-error-on-request.click` | `ERROR true` on a request rejected at configure time (RFC 6733 section 3) |
+| `encap-proxiable-on-answer.click` | `PROXIABLE true` on an answer rejected at configure time (RFC 6733 section 3) |
 | `rated-source.click` | a generated message is 20 octets: version 1, Length 20, flags `80`, code `000118`, App-Id 42 |
+| `rated-source-answer.click` | a generated answer is 20 octets with flags `00`: E and P clear |
 | `popstorepush-roundtrip.click` | popping an unpadded AVP and pushing it back restores the 44-octet message (F-1) |
 | `no-avp.click` | a header-only message forwarded unchanged by both pop elements |
 | `malformed-short-packet.click` | a 4-octet packet dropped by `DiameterDecap` (F-6) |
@@ -92,7 +108,10 @@ zero octets and the AVP Length excludes that padding (RFC 6733 §4.1); the
 `avp-padding*`, `avp-two-decode`, `avp-decap-*` and `avp-roundtrip` configs pin
 that, so a regression to an unpadded AVP fails the run. The drop tests are the
 exception: they assert no forwarded bytes at all, only the one warning line, so
-a silent drop or a forwarded malformed packet fails.
+a silent drop or a forwarded malformed packet fails. `encap-error-on-request`
+and `encap-proxiable-on-answer` assert the configure path instead: a non-zero
+exit, Click's whole configure-failure output with the named argument, and no
+`Print` line, so an element that accepts the pair fails the run.
 
 ## Decode contract
 
