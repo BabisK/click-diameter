@@ -123,6 +123,15 @@ int DiameterPushAVP::configure(Vector<String> &conf, ErrorHandler *errh)
 
 Packet* DiameterPushAVP::simple_action(Packet * p_in)
 {
+	DiameterCheck check = diameter_check_message(p_in->data(), p_in->length(), 0);
+	if (check != DIAMETER_CHECK_OK)
+	{
+		click_chatter("%s: dropping malformed packet: %s", class_name(),
+				diameter_check_reason(check));
+		p_in->kill();
+		return 0;
+	}
+
 	if(randUInt32 == true)
 	{
 		datauint = rand();
@@ -144,7 +153,10 @@ Packet* DiameterPushAVP::simple_action(Packet * p_in)
 		datastring = randString(Hex, randHexString);
 	}
 
-	uint32_t avpHeaderLength = ah.getVendorSpecific() ? 12 : 8;
+	// The guard just proved that the header Length equals the packet length,
+	// so the message ends exactly where the packet ends.
+	const uint32_t messageLength = p_in->length();
+	uint32_t avpHeaderLength = ah.getHeaderLength();
 	uint32_t avpDataLength = datastring.length() > 0 ? datastring.length() : (datauint > 0 ? 4 : 0);
 	uint32_t avpLength = avpHeaderLength + avpDataLength;
 	uint32_t avpLengthPadded = ((avpLength + 3) / 4) * 4;
@@ -153,21 +165,21 @@ Packet* DiameterPushAVP::simple_action(Packet * p_in)
 	DiameterHeader dh;
 	dh.decode(p->data());
 
-	memset(p->data() + dh.getLength(), 0, avpLengthPadded);
+	memset(p->data() + messageLength, 0, avpLengthPadded);
 
 	ah.setLength(avpLength);
-	ah.encode(p->data() + dh.getLength());
+	ah.encode(p->data() + messageLength);
 	if(datastring.length() > 0)
 	{
-		memcpy(p->data() + dh.getLength() + avpHeaderLength, datastring.data(), avpDataLength);
+		memcpy(p->data() + messageLength + avpHeaderLength, datastring.data(), avpDataLength);
 	}
 	else
 	{
 		uint32_t hton = htonl(datauint);
-		memcpy(p->data() + dh.getLength() + avpHeaderLength, &hton, avpDataLength);
+		memcpy(p->data() + messageLength + avpHeaderLength, &hton, avpDataLength);
 	}
 
-	dh.setLength(dh.getLength() + ah.getLengthPadded());
+	dh.setLength(messageLength + ah.getLengthPadded());
 	dh.encode(p->data());
 
 	return p;

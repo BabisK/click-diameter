@@ -219,6 +219,10 @@ public:
 		return (((this->length + 3) / 4) * 4);
 	}
 
+	uint32_t getHeaderLength() const {
+		return vendorSpecific ? 12 : 8;
+	}
+
 	void decode(const uint8_t* buffer) {
 		code = ((buffer[0] << 24) & 0xFF000000)
 				| ((buffer[1] << 16) & 0x00FF0000)
@@ -260,5 +264,116 @@ public:
 		}
 	}
 };
+
+// Wire-format sizes shared by every element that reads a Diameter frame.
+enum : uint32_t {
+	DIAMETER_MESSAGE_HEADER_LENGTH = 20,
+	DIAMETER_AVP_HEADER_LENGTH = 8
+};
+
+// Why a buffer failed validation. Each element drops the packet and prints one
+// click_chatter line with the matching reason.
+enum DiameterCheck {
+	DIAMETER_CHECK_OK = 0,
+	DIAMETER_CHECK_SHORT_MESSAGE_HEADER,
+	DIAMETER_CHECK_SHORT_AVP_HEADER,
+	DIAMETER_CHECK_SHORT_VENDOR_AVP_HEADER,
+	DIAMETER_CHECK_LENGTH_MISMATCH,
+	DIAMETER_CHECK_AVP_BELOW_HEADER,
+	DIAMETER_CHECK_AVP_PAST_END
+};
+
+inline const char *diameter_check_reason(DiameterCheck check)
+{
+	switch (check) {
+	case DIAMETER_CHECK_OK:
+		return "no error";
+	case DIAMETER_CHECK_SHORT_MESSAGE_HEADER:
+		return "packet shorter than the 20-octet Diameter header";
+	case DIAMETER_CHECK_SHORT_AVP_HEADER:
+		return "packet shorter than the 8-octet AVP header";
+	case DIAMETER_CHECK_SHORT_VENDOR_AVP_HEADER:
+		return "packet shorter than the 12-octet vendor AVP header";
+	case DIAMETER_CHECK_LENGTH_MISMATCH:
+		return "header Length does not match packet length";
+	case DIAMETER_CHECK_AVP_BELOW_HEADER:
+		return "AVP length below its header";
+	case DIAMETER_CHECK_AVP_PAST_END:
+		return "AVP extends past the message end";
+	}
+	return "unknown validation error";
+}
+
+// Checks whether buffer[0..length) holds a whole 20-octet Diameter header whose
+// Length field equals length. Elements that only touch the header stop here.
+inline DiameterCheck diameter_check_header(const uint8_t *buffer, uint32_t length)
+{
+	if (length < DIAMETER_MESSAGE_HEADER_LENGTH)
+		return DIAMETER_CHECK_SHORT_MESSAGE_HEADER;
+	const uint32_t declared = ((uint32_t) buffer[1] << 16)
+			| ((uint32_t) buffer[2] << 8) | buffer[3];
+	if (declared != length)
+		return DIAMETER_CHECK_LENGTH_MISMATCH;
+	return DIAMETER_CHECK_OK;
+}
+
+// Checks one AVP at buffer[0..length): the V bit decides whether its header is
+// 8 or 12 octets, the header must fit, and the declared length must be at least
+// that header and at most the octets available. Padding is not required here: a
+// standalone AVP may arrive unpadded until F-7 lands, and the message walk
+// applies its own padded bound. On success *header_length is the header size
+// and *avp_length the declared length.
+inline DiameterCheck diameter_check_avp(const uint8_t *buffer, uint32_t length,
+		uint32_t *header_length, uint32_t *avp_length)
+{
+	if (length < DIAMETER_AVP_HEADER_LENGTH)
+		return DIAMETER_CHECK_SHORT_AVP_HEADER;
+	const uint32_t headerLength = (buffer[4] & 0x80) ? 12 : 8;
+	if (length < headerLength)
+		return DIAMETER_CHECK_SHORT_VENDOR_AVP_HEADER;
+	const uint32_t avpLength = ((uint32_t) buffer[5] << 16)
+			| ((uint32_t) buffer[6] << 8) | buffer[7];
+	if (avpLength < headerLength)
+		return DIAMETER_CHECK_AVP_BELOW_HEADER;
+	if (avpLength > length)
+		return DIAMETER_CHECK_AVP_PAST_END;
+	*header_length = headerLength;
+	*avp_length = avpLength;
+	return DIAMETER_CHECK_OK;
+}
+
+// Checks whether buffer[0..length) holds exactly one well-formed Diameter
+// message: a whole 20-octet header whose Length field equals length, then a run
+// of AVPs that each pass diameter_check_avp() and whose padded lengths stay
+// inside the message, so the walk always advances. On success
+// *last_avp_offset is the offset of the final AVP, or 0 when the message has
+// none; pass 0 when the caller does not need it.
+inline DiameterCheck diameter_check_message(const uint8_t *buffer,
+		uint32_t length, uint32_t *last_avp_offset)
+{
+	const DiameterCheck headerCheck = diameter_check_header(buffer, length);
+	if (headerCheck != DIAMETER_CHECK_OK)
+		return headerCheck;
+
+	uint32_t offset = DIAMETER_MESSAGE_HEADER_LENGTH;
+	uint32_t lastAvp = 0;
+	while (offset < length) {
+		uint32_t headerLength;
+		uint32_t avpLength;
+		const DiameterCheck check = diameter_check_avp(buffer + offset,
+				length - offset, &headerLength, &avpLength);
+		if (check != DIAMETER_CHECK_OK)
+			return check;
+		const uint32_t paddedLength = (avpLength + 3) & ~3u;
+		if (paddedLength > length - offset)
+			return DIAMETER_CHECK_AVP_PAST_END;
+		lastAvp = offset;
+		offset += paddedLength;
+	}
+
+	if (last_avp_offset)
+		*last_avp_offset = lastAvp;
+	return DIAMETER_CHECK_OK;
+}
 
 #endif /* DIAMETER_HH_ */

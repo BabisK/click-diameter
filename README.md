@@ -175,37 +175,41 @@ CLICK=$HOME/click/bin/click bats --tap tests   # this package installed there
 ```
 
 `tests/smoke.bats` runs each config under `tests/configs/` and asserts its exact
-output. `tests/known-defects/` holds reproductions for the defects below; they
-abort or hang on purpose and are run by hand, not by the suite. CI runs the
+output. `tests/known-defects/` holds handwritten reproductions for the defects
+below; they emit wrong bytes on purpose and are run by hand, not by the suite.
+The `malformed-*` configs in the suite assert the drop path instead — exit 0,
+one warning naming the element and reason, and no `Print` line. CI runs the
 same command on every pull request plus a monthly check against upstream Click
 master.
+
+Malformed input is dropped, never forwarded. The six elements that read a
+received frame — `DiameterDecap`, `DiameterAvpDecap`, `DiameterFlipRequest`,
+`DiameterPushAVP`, `DiameterPopAVP` and `DiameterPopStorePushAVP` — validate it
+first and drop it with one `ELEMENT: dropping malformed packet: REASON` line
+per packet. Drops are not throttled: a hostile source can flood the log, and
+that is accepted. Downstream checks reject `DiameterEncap`'s output until F-4
+gives it a correct Length, and reject unpadded AVPs from `DiameterAvpEncap`
+once they are framed in a message until F-7 pads them.
 
 Known limitations
 -----------------
 
 These elements are not yet RFC-clean in every path. The defects a user hits
 first are listed here; each has a file-and-line description and a reproduction
-in `_bmad-output/specs/spec-diameter-package-hardening/findings.md`, and the
-smoke tests currently assert today's bytes — including the wrong ones — so a
-fix changes a test expectation rather than passing silently.
+in `_bmad-output/specs/spec-diameter-package-hardening/findings.md`. The smoke
+tests assert today's bytes — including the wrong ones — while the
+`malformed-*` tests assert the drop path, so a fix changes a test expectation
+rather than passing silently.
 
 - **AVPs are not padded to 4 octets (F-7).** An 8-byte header plus a 5-byte
   value produces 13 bytes where RFC 6733 requires 16, and decoders do not strip
   padding.
-- **Decapsulators do not length-check (F-6).** A packet shorter than the header
-  is not dropped; the element logs `Packet::pull 20 > length 4` and forwards an
-  empty packet.
 - **`DiameterEncap` emits invalid headers (F-4).** The version byte and the
   identifiers are indeterminate (observed `0x2a`, `0xde`) and Length counts
   only the payload. Use `DiameterRatedSource` to generate traffic, or fix the
   element first.
 - **`DiameterRatedSource` does not set P, E or T (F-5).** A generated request
   can come out with `c0` or `e0` flags — P=1 or E=1 on a request.
-- **`DiameterPushAVP` trusts the header's Length field (F-3).** Appending to a
-  message whose Length disagrees with the packet writes past the end of it.
-- **`DiameterPopStorePushAVP` overflows its heap buffer (F-1)** on any AVP whose
-  length is not a multiple of 4, which is normal traffic. Click aborts with
-  `buffer overflow detected`.
 - **`RANDALPHANUMSTRING 1` yields an empty AVP (F-8)**, the hex generator can
   emit `G`/`g` (F-9), and flipping an *answer* into a request leaves P set
   (F-10), which RFC 6733 forbids in a request.
