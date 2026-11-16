@@ -112,7 +112,7 @@ Empty: no bad_spec loopback was triggered.
 
 ## Review Triage Log
 
-One row per reviewer finding. `blind` = blind hunter, `edge` = edge-case hunter, `vgap` = verification-gap.
+One row per reviewer finding. `blind` = blind hunter, `edge` = edge-case hunter, `vgap` = verification-gap. `deferred` rows record the close-out of items from `deferred-work.md`, which holds open work only.
 
 | # | Layer | Finding | Verdict | Evidence / disposition |
 |---|-------|---------|---------|------------------------|
@@ -141,6 +141,12 @@ One row per reviewer finding. `blind` = blind hunter, `edge` = edge-case hunter,
 | 23 | blind | No failure diagnostics, and the job name omits the package build | low | Job name fixed ("Build and test the package"). Diagnostics deferred. |
 | 24 | blind | No Dependabot/Renovate, no `-Wall` signal, and the work is absent from `sprint-status.yaml` | low | Rejected: outside the intent; the epic status file tracks epic stories, not chores. |
 | 25 | edge | A cache hit with an incomplete prefix leaves the package configure aborting on a missing `config.mk` | low | Rejected: the failure is loud and names the missing file, and the fix adds a branch for a state no run was shown to reach. |
+| 26 | deferred | The smoke configs are judged only by exit status, so a wrong-bytes regression in any covered element still goes green | done | Fixed in #2: `tests/smoke.bats` asserts label, packet length and hex bytes for all six configs under bats-core; `tests/run.sh` retired. `avp-roundtrip` asserts F-7's unpadded bytes and says so, so story 1-3 updates it. |
+| 27 | deferred | The workflow offers no manual dispatch inputs, so a Click ref cannot be pinned to bisect an upstream break | not-doing | Closed by decision: runs always build the latest Click master, and pinning a ref to bisect upstream is out of scope, so a dispatch run is a manual re-run of the master build. No workflow change. |
+| 28 | deferred | Nothing runs the workflow on a schedule, so a Click master break surfaces only when someone opens a PR | done | Fixed in #4: monthly `0 6 1 * *`. The cold-cache rebuild and the 60-day-activity disable are stated in the workflow comment rather than left as surprises. |
+| 29 | deferred | No failure diagnostics are printed, so a red run does not show the resolved Click commit, the cache-hit value or the toolchain | done | Fixed in #5: an `if: failure()` step writes the failing stage, Click SHA, cache hit or miss, Click version and toolchain to the job summary. It is absent on a timeout or manual cancel, where the job is cancelled rather than failed. |
+| 30 | deferred | actionlint runs only as a manual verification command, not as a CI job, so a workflow edit can regress the YAML unnoticed | not-doing | Closed by decision: workflow edits are reviewed by hand and linted with the verification command pinned in this spec. The `-ignore ubuntu-26.04` a job would need today would also mask a genuine runner-label typo until actionlint learns the label. |
+| 31 | deferred | `AGENTS.md`, `tests/README.md` and `README.md` were not updated to mention the CI job or the committed line-ending policy | done | Fixed in #6 for `AGENTS.md`, `tests/README.md` and `.gitattributes`, where the LF-in-index / CRLF-on-Windows policy is now stated. `README.md` gained only the build badge; its install recipe is F-13 and stays with story 1-7. |
 
 ## Verification
 
