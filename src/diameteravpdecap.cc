@@ -24,7 +24,27 @@ Packet* DiameterAvpDecap::simple_action(Packet * p_in)
 		p_in->kill();
 		return 0;
 	}
-	p_in->pull(headerLength);
+
+	// The padding is whatever takes the declared AVP length to the next
+	// 4-octet boundary. It is derived from Length alone -- never from the
+	// padding octets, which RFC 6733 section 4 requires to be zero.
+	const uint32_t paddedLength = (avpLength + 3) & ~3u;
+
+	if (p_in->length() > paddedLength)
+	{
+		// Octets follow this AVP: drop it whole, padding included, so the
+		// next AVP starts at offset 0 and the walk stays aligned.
+		p_in->pull(paddedLength);
+	}
+	else
+	{
+		// This AVP is the whole packet: drop its padding, if any, then its
+		// header, and forward the value. A legacy unpadded AVP decodes the
+		// same way because there is no padding to drop.
+		if (p_in->length() > avpLength)
+			p_in->take(p_in->length() - avpLength);
+		p_in->pull(headerLength);
+	}
 
 	return p_in;
 }

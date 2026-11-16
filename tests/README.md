@@ -43,6 +43,17 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `push-avp-rand.click` | generated value, 8 characters |
 | `pop-avp.click` | removing the last AVP from a two-AVP message |
 | `avp-roundtrip.click` | `DiameterAvpEncap` then `DiameterAvpDecap` returns the payload |
+| `avp-padding.click` | a 5-octet value pads to a 16-octet AVP: Length 13, three zero octets |
+| `avp-padding-two.click` | a 2-octet value pads to 12 octets with two zero octets |
+| `avp-padding-one.click` | a 3-octet value pads to 12 octets with one zero octet |
+| `avp-padding-none.click` | a 4-octet value needs no padding: 12 octets |
+| `avp-padding-empty.click` | an empty value is an 8-octet AVP with no padding |
+| `avp-padding-vendor.click` | the 12-octet vendor header plus a 5-octet value pads to 20 octets |
+| `avp-two-decode.click` | two consecutive padded AVPs decode at the right offsets |
+| `avp-decap-unpadded.click` | a standalone legacy AVP with no padding still decodes |
+| `avp-decap-vendor.click` | a well-formed 20-octet vendor AVP decodes to its 5-octet value |
+| `avp-decap-nonzero-pad.click` | non-zero pad octets do not change the decoded value |
+| `avp-encap-message.click` | Encap then AvpEncap then PopAVP: the encoder's padded AVP passes the message readers |
 | `flip-request.click` | request bit cleared on a request |
 | `decap.click` | stripping the 20-byte header leaves the payload |
 | `encap.click` | a 4-octet payload gets a version 1 header whose Length counts the header plus the payload, 24 octets (F-4) |
@@ -68,26 +79,18 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `malformed-avpdecap-short-length.click` | an AVP length below its header dropped by `DiameterAvpDecap` |
 | `malformed-flip-request-short.click` | a 4-octet packet dropped by `DiameterFlipRequest` |
 
-Expectations record today's bytes. One of them is the known-defect behavior
-itself — `avp-roundtrip` emits 13 unpadded bytes (F-7) — and the test says so,
-so the story that fixes the defect updates the expectation with the fix. The
-drop tests are the exception: they assert no forwarded bytes at all, only the
-one warning line, so a silent drop or a forwarded malformed packet fails.
+Expectations record today's bytes. AVPs are padded to a 4-octet boundary with
+zero octets and the AVP Length excludes that padding (RFC 6733 §4.1); the
+`avp-padding*`, `avp-two-decode`, `avp-decap-*` and `avp-roundtrip` configs pin
+that, so a regression to an unpadded AVP fails the run. The drop tests are the
+exception: they assert no forwarded bytes at all, only the one warning line, so
+a silent drop or a forwarded malformed packet fails.
 
-## known-defects/
+## Decode contract
 
-Reproductions for defects still open in
-`_bmad-output/specs/spec-diameter-package-hardening/findings.md`. They are not
-part of `smoke.bats` because they emit wrong bytes on purpose. Run one by hand
-with a timeout:
-
-```sh
-timeout 10 click tests/known-defects/f7-avp-padding.click
-```
-
-| Config | Finding | Current behavior |
-|---|---|---|
-| `f7-avp-padding.click` | F-7 | exit 0, 13 bytes where RFC 6733 requires 16 |
-
-When a fix lands, move its repro into `configs/` with an assertion on the output
-instead of leaving it here.
+`DiameterAvpDecap` derives the padding from the AVP Length, never from the
+padding octets: `(Length + 3) & ~3` minus `Length` is 0 to 3 octets. When octets
+follow the AVP in the packet, it consumes the AVP whole — header, value and
+padding — so the next AVP starts at offset 0. When the AVP is the whole packet,
+it forwards the value with the padding dropped. A standalone legacy AVP that
+carries no padding still decodes to its value rather than being dropped.

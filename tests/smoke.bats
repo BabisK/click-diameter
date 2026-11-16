@@ -9,11 +9,11 @@
 # today, so a change in them fails the run. Octets that are deliberately random
 # -- the hbh/e2e identifiers of F-11 -- are matched with a regex instead of
 # compared exactly, and the encap test runs its config a second time to check
-# that every other field comes back byte for byte. Where today's bytes are the
-# known defect itself, the test names the finding so the story that fixes it
-# updates the expectation in the same change. The malformed-* tests assert the
-# drop path instead: exit 0, one warning naming the element and reason, and no
-# Print line.
+# that every other field comes back byte for byte. The avp-padding* and
+# avp-decap-* tests pin the 4-octet AVP alignment of RFC 6733 section 4.1 and
+# the rule that the decoder derives padding from Length alone. The malformed-*
+# tests assert the drop path instead: exit 0, one warning naming the element and
+# reason, and no Print line.
 
 click=${CLICK:-click}
 click_timeout=${CLICK_TIMEOUT:-10}
@@ -63,9 +63,79 @@ expect_drop() {
 @test "avp-roundtrip: DiameterAvpEncap then DiameterAvpDecap returns the payload" {
 	run_click avp-roundtrip.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
-	# F-7: 13 bytes, unpadded to a 4-octet boundary; story 1-3 makes it 16
-	# and leaves the decoded payload at 5 bytes.
-	expect $'avp-encap:   13 | 00000108 0000000d 61626364 65\navp-decap:    5 | 61626364 65'
+	# 8-octet header plus the 5-octet value is 13, padded to 16 octets; the
+	# decoder strips the pad, so the value comes back byte for byte (F-7).
+	expect $'avp-encap:   16 | 00000108 0000000d 61626364 65000000\navp-decap:    5 | 61626364 65'
+}
+
+@test "avp-padding: a 5-octet value is padded to a 16-octet AVP" {
+	run_click avp-padding.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	expect 'avp-padding:   16 | 00000108 0000000d 61626364 65000000'
+}
+
+@test "avp-padding-two: a 2-octet value gets two zero pad octets" {
+	run_click avp-padding-two.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	expect 'avp-padding-two:   12 | 00000108 0000000a 61620000'
+}
+
+@test "avp-padding-none: a 4-octet value needs no padding" {
+	run_click avp-padding-none.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	expect 'avp-padding-none:   12 | 00000108 0000000c 7778797a'
+}
+
+@test "avp-padding-vendor: the 12-octet vendor header is padded too" {
+	run_click avp-padding-vendor.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	expect 'avp-padding-vendor:   20 | 00000108 80000011 0000002a 61626364 65000000'
+}
+
+@test "avp-two-decode: consecutive padded AVPs decode at the right offsets" {
+	run_click avp-two-decode.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	expect $'avp1:   12 | 0000010c 0000000c 7778797a\navp2:    4 | 7778797a'
+}
+
+@test "avp-decap-unpadded: a legacy standalone unpadded AVP still decodes" {
+	run_click avp-decap-unpadded.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	expect 'avp-decap:    5 | 61626364 65'
+}
+
+@test "avp-padding-one: a 3-octet value gets one zero pad octet" {
+	run_click avp-padding-one.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	expect 'avp-padding-one:   12 | 00000108 0000000b 61626300'
+}
+
+@test "avp-padding-empty: an empty value is an 8-octet AVP with no padding" {
+	run_click avp-padding-empty.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	expect 'avp-padding-empty:    8 | 00000108 00000008'
+}
+
+@test "avp-decap-vendor: a 20-octet vendor AVP decodes to its value" {
+	run_click avp-decap-vendor.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	expect 'avp-decap-vendor:    5 | 61626364 65'
+}
+
+@test "avp-decap-nonzero-pad: the pad content does not affect the decode" {
+	run_click avp-decap-nonzero-pad.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	expect 'avp-decap-nonzero-pad:    5 | 61626364 65'
+}
+
+@test "avp-encap-message: a message built from AvpEncap passes the message readers" {
+	run_click avp-encap-message.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# The encoder's padded AVP is accepted by PopAVP, which walks the padded
+	# AVP and restores a header-only 20-octet message. Identifiers are random.
+	local expected='^message: +36 \| 01000024 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 0000000d 61626364 65000000
+pop: +20 \| 01000014 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8}$'
+	[[ "$output" =~ $expected ]] || { echo "expected: the 36-octet message, then the 20-octet header-only frame"; return 1; }
 }
 
 @test "flip-request: request bit cleared on a request" {
