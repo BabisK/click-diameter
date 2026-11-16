@@ -1,0 +1,87 @@
+- id: "1"
+  title: Make malformed Diameter input safe
+  description: >-
+    Handle short packets, zero-length AVPs, declared lengths beyond the packet,
+    and AVPs shorter than their header without overflow, hang, or out-of-bounds write.
+    Covers CAP-1 and findings F-1, F-2, F-3, F-6.
+  spec_checkpoint: true
+  done_checkpoint: true
+  invoke_dev_with: >-
+    Build against upstream click master 9197a594b as described in findings.md.
+    Reproduce each of F-1, F-2, F-3, F-6 first and capture the failing exit code,
+    then fix. Drop malformed packets; do not add an error output port and do not
+    change port counts. Verify with AddressSanitizer as well as the plain build.
+
+- id: "2"
+  title: Give DiameterHeader a real constructor and fix Encap
+  description: >-
+    Initialize every header field and emit version 1 with a Length that counts the
+    20-byte header plus payload. Covers CAP-2 and finding F-4.
+  spec_checkpoint: true
+  invoke_dev_with: >-
+    Byte-assert the encap output: version 1, Length equal to packet length, and
+    identical header bytes across repeated runs. DiameterRatedSource and
+    DiameterPushAVP build headers too; update them in the same change so no path
+    writes an uninitialized header.
+
+- id: "3"
+  title: Pad AVP encoding to 4 octets
+  description: >-
+    Pad encoded AVPs to a 4-octet boundary and strip that padding when decoding,
+    so consecutive AVPs stay aligned. Covers CAP-3 and finding F-7.
+  spec_checkpoint: true
+  invoke_dev_with: >-
+    A 5-byte payload must encode to 16 bytes and round-trip unchanged through
+    AvpEncap then AvpDecap. Two consecutive AVPs must decode at the offsets a
+    decoder expects. Zero the padding bytes unless the user answers the open
+    question in SPEC.md differently.
+
+- id: "4"
+  title: Fix RANDALPHANUMSTRING length and the hex alphabet
+  description: >-
+    Generate exactly the requested number of characters from 0-9 and A-F only.
+    Covers CAP-4 and findings F-8, F-9.
+  invoke_dev_with: >-
+    Assert RANDALPHANUMSTRING 1 gives a 9-byte AVP and RANDALPHANUMSTRING 8 gives
+    16 bytes of data, and scan a 10 kB sample for G or g.
+
+- id: "5"
+  title: Set request and answer flags per RFC 6733
+  description: >-
+    Stop setting E on generated requests, keep P off answers, and clear P when
+    FlipRequest converts a request to an answer. Covers CAP-5 and findings F-5, F-10.
+  invoke_dev_with: >-
+    Flipping a request must clear R and force P to 0; generated requests must show
+    E=0. Do not change the flag bit layout or the element argument surface.
+
+- id: "6"
+  title: Use Click randomness instead of reseeding the C RNG
+  description: >-
+    Replace srand and rand with Click randomness so a run is reproducible from a
+    seed. Covers CAP-6 and finding F-11.
+  invoke_dev_with: >-
+    Two runs at the same Click seed must produce identical packets. Confirm no
+    element references srand or rand afterwards.
+
+- id: "7"
+  title: Document every element and fix the README install recipe
+  description: >-
+    Add =c and =d sections so make install emits 9 man pages, and document the
+    --with-click and --prefix recipe that works without root. Covers CAP-7 and
+    findings F-12, F-13.
+  invoke_dev_with: >-
+    Verify by running make install into a fresh prefix and counting diameter pages
+    in share/man/man7, then follow the README verbatim from that prefix.
+
+- id: "8"
+  title: Clean up package identity and fork leftovers
+  description: >-
+    Fix AC_INIT naming, align include guards with filenames, drop iostream from
+    data-path elements, remove the dead simple_action, and revert the in-tree copy
+    and test from the click fork. Covers CAP-8 and findings F-14, F-15, F-16.
+  spec_checkpoint: true
+  invoke_dev_with: >-
+    The fork change is a separate commit in the click repository, not in this
+    package: revert conf/test.click, remove etc/diameter, and leave
+    click-diameter as the only maintained copy. Rebuild the linuxmodule and bsdpkg
+    targets or explain why they cannot be built on this host.
