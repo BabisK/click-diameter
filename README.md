@@ -220,3 +220,13 @@ Layout
     configure.ac, Makefile.in   build entry points (autoconf, configure, make run here)
     src/                        element sources: one .cc/.hh pair per element, plus diameter.hh
     tests/                      smoke configs, assertions and defect reproductions
+
+License
+-------
+
+This package is distributed under the Click license, the same terms as the
+[Click modular router](https://github.com/kohler/click): an MIT license plus a
+clause forbidding use of the copyright holders' names in advertising or
+publicity without prior written permission. The binding text is in
+[LICENSE](LICENSE). Copyright (c) 2014 Intracom Telecom and (c) 2026
+Charalampos Kaidos.
