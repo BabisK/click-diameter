@@ -17,6 +17,7 @@ from `apt-get install -y bats`.
 bats --tap tests                              # click from PATH
 CLICK=~/click/bin/click bats --tap tests      # explicit binary
 CLICK=~/click/bin/click bats --tap --filter pop-avp tests   # one config
+bats --tap tests/identity.bats                # source checks, no Click needed
 ```
 
 `smoke.bats` runs every config under `configs/` with a 10 s timeout, then
@@ -50,8 +51,8 @@ every header and source under `src/`. It copies `configure.ac` into a temporary
 directory, runs `autoconf` there, and requires `./configure --version` to print
 `click-diameter configure 2.1` (F-14); requires every `src/*.hh` include guard to
 be `<UPPERCASE STEM>_HH_` with an `#endif` comment naming the same guard;
-requires no file under `src/` to include `<iostream>`, which the linuxmodule and
-bsdmodule targets cannot use; and requires no header to declare `simple_action`
+requires no file under `src/` to include `<iostream>`, a userlevel-only header
+the data-path sources carried; and requires no header to declare `simple_action`
 beside `push`, where Click's `Element::push` would never call it (F-15). A byte
 assertion cannot see any of these: a stale guard, an unused include and a
 shadowed hook all leave the emitted packets identical, so only a scan of the
