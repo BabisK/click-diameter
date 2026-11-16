@@ -9,6 +9,7 @@
 - source_spec: `_bmad-output/implementation-artifacts/spec-ci-github-actions-build-and-test.md`
   summary: Nothing runs the workflow on a schedule, so a Click master break surfaces only when someone opens a PR.
   evidence: Triggers are `pull_request`, `push` to `master` and `workflow_dispatch`; upstream Click last moved in 2022, so a quiet week hides a break indefinitely.
+  resolution: Done — the workflow also runs on a monthly schedule, `0 6 1 * *` (the 1st at 06:00 UTC). The cold-cache rebuild and the 60-day-activity disable are recorded in the workflow comment rather than left as surprises.
 - source_spec: `_bmad-output/implementation-artifacts/spec-ci-github-actions-build-and-test.md`
   summary: No failure diagnostics are printed, so a red run does not show the resolved Click commit, the cache-hit value or the toolchain.
   evidence: The workflow has no `if: failure()` step and no job summary; diagnosing an upstream Click break means reading the resolve and build logs by hand.

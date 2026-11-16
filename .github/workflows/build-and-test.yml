@@ -4,6 +4,17 @@ on:
   pull_request:
   push:
     branches: [master]
+  # Monthly, 06:00 UTC on the 1st. Upstream Click last moved in 2022, so a
+  # denser cadence mostly re-runs a cache hit. Two things follow from the gap:
+  # GitHub evicts cache entries unread for seven days, so every scheduled run
+  # rebuilds Click from scratch; and a public repository with 60 days of no
+  # activity has its scheduled workflows disabled by GitHub, so this only keeps
+  # catching upstream breaks while the repository is being worked on.
+  # Scheduled runs share the master concurrency group below, so one can cancel
+  # an in-flight push run of the same commit and be cancelled by it in turn;
+  # the survivor tests the same tree either way.
+  schedule:
+    - cron: '0 6 1 * *'
   workflow_dispatch:
 
 permissions:
