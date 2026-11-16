@@ -1,16 +1,6 @@
 dnl -*- mode: shell-script -*-
 dnl 'configure.ac' file for a sample Click package
 dnl Process this file with autoconf to produce a configure script.
-dnl
-dnl Permission is hereby granted, free of charge, to any person obtaining a
-dnl copy of this software and associated documentation files (the "Software"),
-dnl to deal in the Software without restriction, subject to the conditions
-dnl listed in the Click LICENSE file. These conditions include: you must
-dnl preserve this copyright notice, and you cannot mention the copyright
-dnl holders in advertising related to the Software without their permission.
-dnl The Software is provided WITHOUT ANY WARRANTY, EXPRESS OR IMPLIED. This
-dnl notice is a summary of the Click LICENSE file; the license in that file is
-dnl legally binding.
 
 AC_INIT(click-diameterpackage, 2.0.1)
 AC_SUBST(ac_configure_args)
