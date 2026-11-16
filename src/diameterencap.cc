@@ -7,14 +7,13 @@
 #include "diameterencap.hh"
 #include <click/args.hh>
 #include <click/error.hh>
+#include <click/glue.hh>
 CLICK_DECLS
 
 DiameterEncap::DiameterEncap(){}
 
 int DiameterEncap::configure(Vector<String> &conf, ErrorHandler *errh)
 {
-	srand(time(NULL));
-
 	uint32_t code;
 	bool request;
 	bool error = false;
@@ -54,8 +53,8 @@ int DiameterEncap::configure(Vector<String> &conf, ErrorHandler *errh)
 
 Packet* DiameterEncap::simple_action(Packet * p_in)
 {
-	dh.setHbh(rand());
-	dh.setE2e(rand());
+	dh.setHbh(click_random());
+	dh.setE2e(click_random());
 	dh.setLength(DIAMETER_MESSAGE_HEADER_LENGTH + p_in->length());
 
 	WritablePacket* wp = p_in->push(DIAMETER_MESSAGE_HEADER_LENGTH);

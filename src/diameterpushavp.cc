@@ -41,25 +41,25 @@ static String randString(randStringType type, size_t size)
 	case AlphaNum:
 		while(size-- > 0)
 		{
-			ret.append(alphaNum[rand() % (sizeof(alphaNum)-1)]);
+			ret.append(alphaNum[click_random() % (sizeof(alphaNum)-1)]);
 		}
 		break;
 	case Num:
 		while(size-- > 0)
 		{
-			ret.append(num[rand() % (sizeof(num)-1)]);
+			ret.append(num[click_random() % (sizeof(num)-1)]);
 		}
 		break;
 	case Alpha:
 		while(size-- > 0)
 		{
-			ret.append(alpha[rand() % (sizeof(alpha)-1)]);
+			ret.append(alpha[click_random() % (sizeof(alpha)-1)]);
 		}
 		break;
 	case Hex:
 		while(size-- > 0)
 		{
-			ret.append(hex[rand() % (sizeof(hex)-1)]);
+			ret.append(hex[click_random() % (sizeof(hex)-1)]);
 		}
 		break;
 	}
@@ -72,10 +72,11 @@ DiameterPushAVP::DiameterPushAVP()
 
 int DiameterPushAVP::configure(Vector<String> &conf, ErrorHandler *errh)
 {
-	srand(time(NULL));
-
 	uint32_t code;
-	bool vendorSpec;
+	// VENDORSPEC defaults to false. It stays that way when the argument is
+	// absent, so initialize it rather than read an indeterminate stack slot
+	// that decides whether the AVP gets a 12-octet vendor header.
+	bool vendorSpec = false;
 	uint32_t vendorId;
 
 	if (Args(conf, this, errh)
@@ -120,7 +121,7 @@ Packet* DiameterPushAVP::simple_action(Packet * p_in)
 
 	if(randUInt32 == true)
 	{
-		datauint = rand();
+		datauint = click_random();
 	}
 	else if(randAlphaNumString > 0)
 	{

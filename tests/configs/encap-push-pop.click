@@ -5,7 +5,8 @@ require(diameter);
 // PopAVP strips that AVP again. The encapsulated payload is itself an AVP (code
 // 264, no value) because the readers validate every octet after the header: a
 // bare 4-octet payload such as deadbeef is a truncated AVP header and is
-// dropped. Identifiers are random (F-11) and the test regexes them.
+// dropped. The config sets no seed, so the identifiers vary per run and the
+// test regexes them.
 InfiniteSource(DATA \<00 00 01 08 00 00 00 08>, LIMIT 1, STOP true)
 -> DiameterEncap(CODE 280, REQUEST true)
 -> Print(encap, MAXLENGTH 200, CONTENTS HEX)
