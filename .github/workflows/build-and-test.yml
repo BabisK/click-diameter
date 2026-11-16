@@ -1,0 +1,91 @@
+name: Build and test
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: Build and test the package
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      # The package is installed into the same prefix as Click, so
+      # `require(diameter)` resolves. Resolving Click's commit first lets the
+      # cache key follow upstream: new commit, new key, Click rebuilt.
+      - name: Resolve the Click master commit
+        id: click
+        run: |
+          for attempt in 1 2 3; do
+            sha=$(git ls-remote https://github.com/kohler/click.git \
+              refs/heads/master | cut -f1 || true)
+            if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "sha=$sha" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "attempt $attempt: Click master did not resolve to a SHA (got '${sha:-nothing}')" >&2
+            if [ "$attempt" -lt 3 ]; then
+              sleep $((attempt * 5))
+            fi
+          done
+          echo "could not resolve Click master after 3 attempts" >&2
+          exit 1
+
+      # Bump the `v1` in both cache keys below whenever the Click configure
+      # invocation, or anything else that shapes the cached prefix, changes.
+      - name: Restore the Click install
+        id: click-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/click
+          key: click-${{ runner.os }}-v1-${{ steps.click.outputs.sha }}
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf libpcap-dev
+
+      - name: Build and install Click
+        if: steps.click-cache.outputs.cache-hit != 'true'
+        env:
+          CLICK_SHA: ${{ steps.click.outputs.sha }}
+        run: |
+          git init "$RUNNER_TEMP/click"
+          git -C "$RUNNER_TEMP/click" fetch --depth 1 \
+            https://github.com/kohler/click.git "$CLICK_SHA"
+          git -C "$RUNNER_TEMP/click" checkout --detach FETCH_HEAD
+          cd "$RUNNER_TEMP/click"
+          ./configure --prefix="$HOME/click" --enable-userlevel --disable-linuxmodule
+          make -j"$(nproc)"
+          make install
+
+      # Saved here, not by the restore action's post step, so a PR whose package
+      # build or tests fail still keeps its Click build for the next run.
+      - name: Save the Click install
+        if: steps.click-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/click
+          key: click-${{ runner.os }}-v1-${{ steps.click.outputs.sha }}
+
+      - name: Build and install the package
+        run: |
+          autoconf
+          ./configure --with-click="$HOME/click" --prefix="$HOME/click"
+          make -j"$(nproc)"
+          make install
+
+      - name: Run the smoke configs
+        run: tests/run.sh "$HOME/click/bin/click"
