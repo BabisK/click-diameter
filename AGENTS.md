@@ -25,7 +25,7 @@ Planning artifacts, the contract, and the defect backlog live in `_bmad-output/`
 
 - Build and run on Linux or WSL only. Click has no Windows build, and CRLF in a Windows checkout breaks its shell scripts, so export the tree and normalize line endings before building from WSL.
 - `autoconf && ./configure --with-click=PREFIX --prefix=PREFIX && make && make install`. Both flags matter: without `--with-click` it stops at `config.mk not found`; without `--prefix` it installs to `/usr/local` and fails on permissions.
-- Verify with `tests/run.sh PATH_TO_CLICK` against a prefix that already carries this package. There is no `make check`.
+- Verify with `CLICK=PREFIX/bin/click bats --tap tests` against a prefix that already carries this package; install bats-core first (`apt-get install -y bats`). There is no `make check`.
 
 ## Conventions that differ from defaults
 

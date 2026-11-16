@@ -55,7 +55,7 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential autoconf libpcap-dev
+          sudo apt-get install -y build-essential autoconf libpcap-dev bats
 
       - name: Build and install Click
         if: steps.click-cache.outputs.cache-hit != 'true'
@@ -88,4 +88,4 @@ jobs:
           make install
 
       - name: Run the smoke configs
-        run: tests/run.sh "$HOME/click/bin/click"
+        run: CLICK="$HOME/click/bin/click" bats --tap tests
