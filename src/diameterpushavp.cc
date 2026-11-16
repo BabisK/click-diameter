@@ -33,9 +33,7 @@ static String randString(randStringType type, size_t size)
 	        "abcdefghijklmnopqrstuvwxyz";
 
 	static const char hex[] =
-	        "0123456789"
-	        "ABCDEFG"
-	        "abcdefg";
+	        "0123456789ABCDEF";
 
 	String ret;
 	switch(type)
@@ -124,7 +122,7 @@ Packet* DiameterPushAVP::simple_action(Packet * p_in)
 	{
 		datauint = rand();
 	}
-	else if(randAlphaNumString > true)
+	else if(randAlphaNumString > 0)
 	{
 		datastring = randString(AlphaNum, randAlphaNumString);
 	}
