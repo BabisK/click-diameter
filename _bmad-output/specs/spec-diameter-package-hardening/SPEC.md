@@ -43,7 +43,7 @@ A pain to solve, with a correctness mandate behind it. The `click-diameter` pack
 
 - Verification baseline is upstream `kohler/click` master `9197a594b`, built from a pristine archive; not a release tag.
 - The package stays out-of-tree: `--with-click` configure, `diameter.uo` plus `elementmap-diameter.xml`, loadable with `require(diameter)`.
-- Element names, argument names, and port counts are frozen; existing `.click` configs must keep parsing and wiring.
+- Existing `.click` configurations must keep working; if a fix requires changing an element name, argument or port count, update the configs in the same change.
 - Every package target the Makefile declares (userlevel, linuxmodule, bsdpkg) stays compilable; no userlevel-only headers in packet data-path code.
 - Zero warnings at `-Wall -Wextra`, with no new third-party dependency.
 - Malformed input is dropped, never forwarded as an empty or partial packet, and never repaired into a plausible-looking message.
@@ -61,11 +61,11 @@ On a clean upstream-master install, the package builds with zero warnings, the f
 
 ## Assumptions
 
-- Port counts in the generated elementmap (1/1, with 1/2 for `DiameterPopStorePushAVP`) are the intended contract; no error output port is added, since that would break the frozen surface.
+- Port counts in the generated elementmap (1/1, with 1/2 for `DiameterPopStorePushAVP`) describe the current shape; a fix may change them only if the `.click` configs relying on that shape change in the same commit.
 - A zero-length AVP and a declared length larger than the packet are malformed input, not legitimate data, so dropping is acceptable.
 - Happy-path wire behavior is correct except where `findings.md` says otherwise; no other byte-level format change is intended.
 
 ## Open Questions
 
 - Should AVP encoder padding bytes be zeroed? RFC 6733 requires receivers to ignore padding but does not mandate zero, and stacks differ on whether nonzero padding is tolerated.
-- On a short packet or inconsistent length field, should the element drop silently or also log an error? An error port is ruled out by the frozen port-count constraint.
+- On a short packet or inconsistent length field, should the element drop silently or also log an error? Both fit the current shape; adding an error output would change port counts and the configs that rely on them.
