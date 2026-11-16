@@ -20,6 +20,9 @@ asserts the exact bytes the config printed: label, packet length and hex
 contents. A wrong length field, a changed flag or an off-by-one is a failed
 test, not a silent pass.
 
+CI runs the same command on every pull request and every push to `master`, plus
+monthly against the latest Click master, so a local pass is the same check.
+
 ## configs/
 
 Behavior that must keep working. Each config has one test in `smoke.bats`:

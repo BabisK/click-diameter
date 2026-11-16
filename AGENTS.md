@@ -23,9 +23,10 @@ Planning artifacts, the contract, and the defect backlog live in `_bmad-output/`
 
 ## Running and verifying
 
-- Build and run on Linux or WSL only. Click has no Windows build, and CRLF in a Windows checkout breaks its shell scripts, so export the tree and normalize line endings before building from WSL.
+- Build and run on Linux or WSL only. Click has no Windows build, and CRLF in a Windows checkout breaks its shell scripts, so export the tree and normalize line endings before building from WSL. The committed policy is `.gitattributes` (`* text=auto`): LF in the index, CRLF in a Windows worktree.
 - `autoconf && ./configure --with-click=PREFIX --prefix=PREFIX && make && make install`. Both flags matter: without `--with-click` it stops at `config.mk not found`; without `--prefix` it installs to `/usr/local` and fails on permissions.
 - Verify with `CLICK=PREFIX/bin/click bats --tap tests` against a prefix that already carries this package; install bats-core first (`apt-get install -y bats`). There is no `make check`.
+- CI runs the same recipe: `.github/workflows/build-and-test.yml` builds Click master (resolved to a SHA, cached by it) on every pull request, on pushes to `master`, and monthly on the 1st. A local pass is the same check.
 
 ## Conventions that differ from defaults
 

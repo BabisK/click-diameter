@@ -1,6 +1,8 @@
 click-diameter
 ==============
 
+[![Build and test](https://github.com/BabisK/click-diameter/actions/workflows/build-and-test.yml/badge.svg?branch=master)](https://github.com/BabisK/click-diameter/actions/workflows/build-and-test.yml)
+
 Diameter package for click router
 
 LAYOUT
