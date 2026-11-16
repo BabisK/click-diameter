@@ -3,8 +3,8 @@
  * Charalampos "Babis" Kaidos
  */
 
-#ifndef DIAMETER_HH
-#define DIAMETER_HH
+#ifndef DIAMETER_HH_
+#define DIAMETER_HH_
 
 #include <stdint.h>
 

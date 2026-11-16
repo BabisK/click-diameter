@@ -1,8 +1,10 @@
 # tests
 
 Click configs that exercise the package, with byte-level assertions, plus
-assertions over the man pages the install renders. There is no `make check`;
-these run against an installed Click that already carries `diameter.uo`.
+assertions over the man pages the install renders and over the source tree
+itself. There is no `make check`; these run against an installed Click that
+already carries `diameter.uo`, except the source-level `identity.bats`, which
+needs no Click at all.
 
 ## Running
 
@@ -42,6 +44,19 @@ one whose block no longer names an argument the header parses, fails the run;
 an argument added to a `configure()` that the page does not mention is caught
 at review instead. When the prefix is not on `MANPATH`, read a page with
 `man -M PREFIX/share/man DiameterEncap`.
+
+`identity.bats` reads the tree instead of a running router: `configure.ac`, and
+every header and source under `src/`. It copies `configure.ac` into a temporary
+directory, runs `autoconf` there, and requires `./configure --version` to print
+`click-diameter configure 2.1` (F-14); requires every `src/*.hh` include guard to
+be `<UPPERCASE STEM>_HH_` with an `#endif` comment naming the same guard;
+requires no file under `src/` to include `<iostream>`, which the linuxmodule and
+bsdmodule targets cannot use; and requires no header to declare `simple_action`
+beside `push`, where Click's `Element::push` would never call it (F-15). A byte
+assertion cannot see any of these: a stale guard, an unused include and a
+shadowed hook all leave the emitted packets identical, so only a scan of the
+tree catches a regression. Autoconf 2.72 warns about `AC_OUTPUT` on
+`configure.ac:73`; that warning is pre-existing, and the test reads stdout only.
 
 The `randomness-*` configs pin `RandomSeed(SEED 12345)`, and their assertions
 live in `expect_seeded`, the seeded counterpart of `expect_drop` and

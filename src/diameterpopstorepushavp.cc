@@ -9,7 +9,6 @@
 #include <click/args.hh>
 #include <click/confparse.hh>
 #include <click/glue.hh>
-#include <iostream>
 CLICK_DECLS
 
 DiameterPopStorePushAVP::DiameterPopStorePushAVP()
@@ -27,21 +26,21 @@ void DiameterPopStorePushAVP::push(int, Packet* p)
 {
 	if(data == NULL)
 	{
-		if ((p = simple_action(p)))
+		if ((p = process(p)))
 		{
 			output(0).push(p);
 		}
 	}
 	else
 	{
-		if ((p = simple_action(p)))
+		if ((p = process(p)))
 		{
 			output(1).push(p);
 		}
 	}
 }
 
-Packet* DiameterPopStorePushAVP::simple_action(Packet * p_in)
+Packet* DiameterPopStorePushAVP::process(Packet * p_in)
 {
 	uint32_t lastAvpOffset;
 	DiameterCheck check = diameter_check_message(p_in->data(), p_in->length(),
