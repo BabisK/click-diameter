@@ -20,6 +20,13 @@
 
 #include <stdint.h>
 
+// Wire-format sizes shared by every element that reads or writes a Diameter
+// frame.
+enum : uint32_t {
+	DIAMETER_MESSAGE_HEADER_LENGTH = 20,
+	DIAMETER_AVP_HEADER_LENGTH = 8
+};
+
 class DiameterHeader {
 private:
 	uint8_t version;
@@ -34,6 +41,19 @@ private:
 	uint32_t e2e;
 
 public:
+	DiameterHeader() :
+			version(1),
+			length(DIAMETER_MESSAGE_HEADER_LENGTH),
+			request(false),
+			proxiable(false),
+			error(false),
+			retransmitted(false),
+			code(0),
+			appId(0),
+			hbh(0),
+			e2e(0) {
+	}
+
 	void setVersion(uint8_t version) {
 		this->version = version;
 	}
@@ -136,7 +156,7 @@ public:
 	}
 
 	void encode(uint8_t* buffer) {
-		memset(buffer, 0, 20);
+		memset(buffer, 0, DIAMETER_MESSAGE_HEADER_LENGTH);
 		buffer[0] = version;
 		buffer[1] = (length >> 16) & 0xFF;
 		buffer[2] = (length >> 8) & 0xFF;
@@ -263,12 +283,6 @@ public:
 			buffer[11] = vendorId & 0xFF;
 		}
 	}
-};
-
-// Wire-format sizes shared by every element that reads a Diameter frame.
-enum : uint32_t {
-	DIAMETER_MESSAGE_HEADER_LENGTH = 20,
-	DIAMETER_AVP_HEADER_LENGTH = 8
 };
 
 // Why a buffer failed validation. Each element drops the packet and prints one

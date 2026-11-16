@@ -187,9 +187,9 @@ received frame — `DiameterDecap`, `DiameterAvpDecap`, `DiameterFlipRequest`,
 `DiameterPushAVP`, `DiameterPopAVP` and `DiameterPopStorePushAVP` — validate it
 first and drop it with one `ELEMENT: dropping malformed packet: REASON` line
 per packet. Drops are not throttled: a hostile source can flood the log, and
-that is accepted. Downstream checks reject `DiameterEncap`'s output until F-4
-gives it a correct Length, and reject unpadded AVPs from `DiameterAvpEncap`
-once they are framed in a message until F-7 pads them.
+that is accepted. Until F-7 pads them, AVPs from `DiameterAvpEncap` carry no
+4-octet padding, so a message whose last AVP came from that element fails the
+message checks and is dropped.
 
 Known limitations
 -----------------
@@ -204,15 +204,13 @@ rather than passing silently.
 - **AVPs are not padded to 4 octets (F-7).** An 8-byte header plus a 5-byte
   value produces 13 bytes where RFC 6733 requires 16, and decoders do not strip
   padding.
-- **`DiameterEncap` emits invalid headers (F-4).** The version byte and the
-  identifiers are indeterminate (observed `0x2a`, `0xde`) and Length counts
-  only the payload. Use `DiameterRatedSource` to generate traffic, or fix the
-  element first.
-- **`DiameterRatedSource` does not set P, E or T (F-5).** A generated request
-  can come out with `c0` or `e0` flags — P=1 or E=1 on a request.
-- **`RANDALPHANUMSTRING 1` yields an empty AVP (F-8)**, the hex generator can
-  emit `G`/`g` (F-9), and flipping an *answer* into a request leaves P set
-  (F-10), which RFC 6733 forbids in a request.
+- **Flag policy is not enforced (F-5, F-10).** RFC 6733 §3 forbids P on an
+  answer, yet `DiameterEncap` accepts any flag combination and
+  `DiameterFlipRequest` leaves P as it found it, so an answer can keep P. Flags
+  start clear now that every header is initialized, but nothing checks what a
+  caller then sets.
+- **`RANDALPHANUMSTRING 1` yields an empty AVP (F-8)** and the hex generator can
+  emit `G`/`g` (F-9).
 
 Layout
 ------

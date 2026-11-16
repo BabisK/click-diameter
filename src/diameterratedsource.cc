@@ -66,7 +66,7 @@ DiameterRatedSource::configure(Vector<String> &conf, ErrorHandler *errh)
     _appid = appid;
 
     dh.setVersion(1);
-    dh.setLength(20);
+    dh.setLength(DIAMETER_MESSAGE_HEADER_LENGTH);
     dh.setRequest(request);
     dh.setCode(_code);
     dh.setAppId(_appid);
@@ -162,8 +162,9 @@ DiameterRatedSource::setup_packet()
     // note: if you change `headroom', change `click-align'
     unsigned int headroom = 16+20+24;
 
-    uint8_t data[20] = {0};
-    _packet = Packet::make(headroom, reinterpret_cast<unsigned char*>(data), 20, 0);
+    uint8_t data[DIAMETER_MESSAGE_HEADER_LENGTH] = {0};
+    _packet = Packet::make(headroom, reinterpret_cast<unsigned char*>(data),
+			   DIAMETER_MESSAGE_HEADER_LENGTH, 0);
 }
 
 String

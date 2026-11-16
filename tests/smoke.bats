@@ -5,12 +5,15 @@
 #   bats --tap tests                              # click from PATH
 #   CLICK=~/click/bin/click bats --tap tests      # explicit binary
 #
-# Requires bats-core. Every expectation below records what the element emits
-# today: the point of the suite is that a change in the bytes fails the run.
-# Where today's bytes are the known defect itself, the test names the finding
-# so the story that fixes it updates the expectation in the same change. The
-# malformed-* tests assert the drop path instead: exit 0, one warning naming
-# the element and reason, and no Print line.
+# Requires bats-core. Every expectation below pins the bytes the element emits
+# today, so a change in them fails the run. Octets that are deliberately random
+# -- the hbh/e2e identifiers of F-11 -- are matched with a regex instead of
+# compared exactly, and the encap test runs its config a second time to check
+# that every other field comes back byte for byte. Where today's bytes are the
+# known defect itself, the test names the finding so the story that fixes it
+# updates the expectation in the same change. The malformed-* tests assert the
+# drop path instead: exit 0, one warning naming the element and reason, and no
+# Print line.
 
 click=${CLICK:-click}
 click_timeout=${CLICK_TIMEOUT:-10}
@@ -75,6 +78,57 @@ expect_drop() {
 	run_click decap.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
 	expect 'decap:    4 | deadbeef'
+}
+
+@test "encap: version 1, Length counts the header plus the payload" {
+	run_click encap.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# F-4: version, Length, flags, code and App-Id are asserted exactly; only the
+	# random hbh/e2e of F-11 are regexed.
+	local expected='^encap: +24 \| 01000018 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} deadbeef$'
+	[[ "$output" =~ $expected ]] || { echo "expected: 24 octets, version 1, Length 24, then the payload"; return 1; }
+	# REPEATED_RUNS: a second run must agree on every field that is not random.
+	local deterministic='{ print $1, $2, $3, $4, $5, $6 }'
+	local first_run
+	first_run=$(awk "$deterministic" <<<"$output")
+	run_click encap.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	[ "$(awk "$deterministic" <<<"$output")" = "$first_run" ] || { echo "expected: version, Length, flags, code and App-Id identical across runs"; return 1; }
+}
+
+@test "encap-empty: a zero-octet packet gets a 20-octet header" {
+	run_click encap-empty.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	local expected='^encap-empty: +20 \| 01000014 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8}$'
+	[[ "$output" =~ $expected ]] || { echo "expected: 20 octets, version 1, Length 20, no payload"; return 1; }
+}
+
+@test "encap-decap: the encapsulated payload survives Decap without a drop" {
+	run_click encap-decap.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# Only the two Print lines: any drop warning fails the regex.
+	local expected='^encap: +24 \| 01000018 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} deadbeef
+decap: +4 \| deadbeef$'
+	[[ "$output" =~ $expected ]] || { echo "expected: the 24-octet message, then deadbeef after Decap"; return 1; }
+}
+
+@test "encap-push-pop: Encap then PushAVP then PopAVP keeps the frame consistent" {
+	run_click encap-push-pop.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# 28 octets in (header plus one 8-octet AVP), 16 padded AVP octets appended
+	# (Length 0x2c), then popped again (Length 0x1c). Only the identifiers
+	# (F-11) vary.
+	local expected='^encap: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
+push: +44 \| 0100002c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008 00000108 0000000d 61626364 65000000
+pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008$'
+	[[ "$output" =~ $expected ]] || { echo "expected: 28, 44 and 28 octets with Lengths 0x1c, 0x2c and 0x1c"; return 1; }
+}
+
+@test "rated-source: 20 octets, version 1, Length 20, flags 80, code 000118" {
+	run_click rated-source.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	local expected='^rated-source: +20 \| 01000014 80000118 0000002a [0-9a-f]{8} [0-9a-f]{8}$'
+	[[ "$output" =~ $expected ]] || { echo "expected: 20 octets, version 1, Length 20, flags 80, code 000118, App-Id 0000002a"; return 1; }
 }
 
 @test "popstorepush-roundtrip: unpadded AVP pop then push restores the message" {

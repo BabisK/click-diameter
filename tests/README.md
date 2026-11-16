@@ -16,9 +16,12 @@ CLICK=~/click/bin/click bats --tap --filter pop-avp tests   # one config
 ```
 
 `smoke.bats` runs every config under `configs/` with a 10 s timeout, then
-asserts the exact bytes the config printed: label, packet length and hex
-contents. A wrong length field, a changed flag or an off-by-one is a failed
-test, not a silent pass. The `malformed-*` configs assert the drop path instead:
+asserts the bytes the config printed: label, packet length and hex contents. A
+wrong length field, a changed flag or an off-by-one is a failed test, not a
+silent pass. The octets that are deliberately random — the `hbh`/`e2e`
+identifiers of F-11 — are matched with a regex instead of pinned, and the
+`encap` test runs its config a second time to check that every other field comes
+back byte for byte. The `malformed-*` configs assert the drop path instead:
 exit 0, no `Print` line, and exactly one warning naming the element and reason.
 
 Malformed input is dropped, never forwarded. A drop is asserted with
@@ -42,6 +45,11 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `avp-roundtrip.click` | `DiameterAvpEncap` then `DiameterAvpDecap` returns the payload |
 | `flip-request.click` | request bit cleared on a request |
 | `decap.click` | stripping the 20-byte header leaves the payload |
+| `encap.click` | a 4-octet payload gets a version 1 header whose Length counts the header plus the payload, 24 octets (F-4) |
+| `encap-empty.click` | a zero-octet packet gets a 20-octet header, version 1 and Length 20 (F-4) |
+| `encap-decap.click` | Encap then Decap forwards the payload instead of dropping it (F-4) |
+| `encap-push-pop.click` | Encap then PushAVP grows a 28-octet frame to 44 and PopAVP restores 28 (F-4) |
+| `rated-source.click` | a generated message is 20 octets: version 1, Length 20, flags `80`, code `000118`, App-Id 42 |
 | `popstorepush-roundtrip.click` | popping an unpadded AVP and pushing it back restores the 44-octet message (F-1) |
 | `no-avp.click` | a header-only message forwarded unchanged by both pop elements |
 | `malformed-short-packet.click` | a 4-octet packet dropped by `DiameterDecap` (F-6) |
@@ -79,7 +87,6 @@ timeout 10 click tests/known-defects/f7-avp-padding.click
 
 | Config | Finding | Current behavior |
 |---|---|---|
-| `f4-encap-header.click` | F-4 | exit 0, version byte garbage, Length counts payload only |
 | `f7-avp-padding.click` | F-7 | exit 0, 13 bytes where RFC 6733 requires 16 |
 
 When a fix lands, move its repro into `configs/` with an assertion on the output
