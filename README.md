@@ -219,9 +219,12 @@ argument named in the error, and no `Print` line. `tests/manpages.bats` reads
 the prefix the Click binary lives in and asserts one page per element, with its
 arguments, handlers and the package element list, whose entries sit under a
 known category with a summary; it also checks that the six readers document
-their drop path and the two pop elements their no-AVP no-op. CI runs the same
-command on every pull request plus a monthly check against upstream Click
-master.
+their drop path and the two pop elements their no-AVP no-op.
+`tests/identity.bats` needs no Click at all: it reads `configure.ac` and `src/`,
+requiring the package to identify itself as `click-diameter` 2.1, every include
+guard to match its filename, no `<iostream>` include, and no `simple_action`
+beside a `push` override (F-14, F-15). CI runs the same command on every pull
+request plus a monthly check against upstream Click master.
 
 Malformed input is dropped, never forwarded. The six elements that read a
 received frame — `DiameterDecap`, `DiameterAvpDecap`, `DiameterFlipRequest`,
@@ -288,20 +291,22 @@ multi-threaded router's interleaving is not fixed by the seed.
 Known limitations
 -----------------
 
-Three findings remain, each with a file-and-line description and a reproduction
-in `_bmad-output/specs/spec-diameter-package-hardening/findings.md`: the package
-identity (`AC_INIT(click-diameterpackage, 2.0.1)`, F-14), the stale include
-guards, the `<iostream>` includes in data-path elements and the dead
-`simple_action()` beside `push()` (F-15), and the Click fork that still carries
-an in-tree copy of these elements beside a `conf/test.click` that does not
-configure (F-16).
+One finding remains open, and it lands outside this repository: the Click fork
+`BabisK/click` still carries `conf/test.click`, which does not configure, and
+`etc/diameter/`, a stale in-tree copy of these elements (F-16). The removal
+is one commit in that fork — delete `conf/test.click` and `etc/diameter/`
+there — so nothing in this package can perform or verify it. The package
+identity (F-14) and the stale include guards, the `<iostream>` includes in
+data-path elements and the dead `simple_action()` beside `push()` (F-15) are
+fixed, and `tests/identity.bats` pins them. The file-and-line evidence for all
+three stays in `_bmad-output/specs/spec-diameter-package-hardening/findings.md`.
 
 Layout
 ------
 
     configure.ac, Makefile.in   build entry points (autoconf, configure, make run here)
     src/                        element sources: one .cc/.hh pair per element, plus diameter.hh
-    tests/                      smoke configs, byte-level assertions and man page assertions
+    tests/                      smoke configs, byte-level, man page and identity assertions
 
 License
 -------

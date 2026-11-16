@@ -3,8 +3,8 @@
  * Charalampos "Babis" Kaidos
  */
 
-#ifndef DIAMETERAVPDECAP_HH
-#define DIAMETERAVPDECAP_HH
+#ifndef DIAMETERAVPDECAP_HH_
+#define DIAMETERAVPDECAP_HH_
 #include <click/element.hh>
 #include "diameter.hh"
 CLICK_DECLS
@@ -73,4 +73,4 @@ public:
 };
 
 CLICK_ENDDECLS
-#endif /* DIAMETERAVPDECAP_HH */
+#endif /* DIAMETERAVPDECAP_HH_ */

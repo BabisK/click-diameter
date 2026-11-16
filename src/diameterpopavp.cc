@@ -8,7 +8,6 @@
 #include <click/args.hh>
 #include <click/confparse.hh>
 #include <click/glue.hh>
-#include <iostream>
 CLICK_DECLS
 
 DiameterPopAVP::DiameterPopAVP(){}

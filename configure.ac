@@ -2,7 +2,7 @@ dnl -*- mode: shell-script -*-
 dnl 'configure.ac' file for a sample Click package
 dnl Process this file with autoconf to produce a configure script.
 
-AC_INIT(click-diameterpackage, 2.0.1)
+AC_INIT([click-diameter], [2.1])
 AC_SUBST(ac_configure_args)
 
 CLICKPACKAGENAME=diameter
