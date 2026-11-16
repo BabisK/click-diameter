@@ -9,6 +9,53 @@
 #include "diameter.hh"
 CLICK_DECLS
 
+/*
+=c
+
+DiameterAvpEncap(CODE [, VENDORID, MANDATORY])
+
+=s basictransfer
+
+prepends an AVP header to each packet
+
+=d
+
+Treats the whole incoming packet as an AVP value and prepends an AVP header to
+it. The header carries the AVP Code CODE, the M bit from MANDATORY, and a Length
+of the header size plus the value length. VENDORID selects the header size: zero
+gives the plain 8-octet header with the V bit clear, and a non-zero value gives
+the 12-octet vendor header with V set and that Vendor-Id.
+
+The AVP is padded to a 4-octet boundary with zero octets and its Length excludes
+that padding, per RFC 6733 section 4.1, so a sequence of encoder outputs stays
+aligned. The payload is not validated or interpreted; this element is a writer,
+not a reader.
+
+Keyword arguments are:
+
+=over 8
+
+=item CODE
+
+Integer. Required. The AVP Code.
+
+=item VENDORID
+
+Integer. Vendor-Id written into the vendor header; a non-zero value also turns
+the V bit on and widens the header to 12 octets. Default is 0, which selects
+the 8-octet header.
+
+=item MANDATORY
+
+Boolean. Sets the M bit. Default is false.
+
+=back
+
+=a
+
+DiameterAvpDecap, DiameterPushAVP
+*/
+
 class DiameterAvpEncap : public Element
 {
 public:
