@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 11-16-2026 11:20
-last_updated: 11-16-2026 21:52
+last_updated: 11-16-2026 22:24
 project: click-diameter
 project_key: NOKEY
 tracking_system: file-system
@@ -41,7 +41,7 @@ development_status:
   1-3-pad-avp-encoding-to-4-octets: done
   1-4-fix-randalphanumstring-length-and-the-hex-alphabet: done
   1-5-set-request-and-answer-flags-per-rfc-6733: done
-  1-6-use-click-randomness-instead-of-reseeding-the-c-rng: backlog
+  1-6-use-click-randomness-instead-of-reseeding-the-c-rng: done
   1-7-document-every-element-and-fix-the-readme-install-recipe: backlog
   1-8-clean-up-package-identity-and-fork-leftovers: backlog
   epic-1-retrospective: optional
