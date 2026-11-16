@@ -26,6 +26,11 @@
 .cproject
 .project
 
+# Editor and agent tooling
+.idea/
+.agents/
+.opencode/
+
 # click files
 *.d
 *.ko.cmd
