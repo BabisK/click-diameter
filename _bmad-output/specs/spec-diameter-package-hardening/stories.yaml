@@ -10,7 +10,10 @@
     Build against upstream click master 9197a594b as described in findings.md.
     Reproduce each of F-1, F-2, F-3, F-6 first and capture the failing exit code,
     then fix. Drop malformed packets; do not add an error output port and do not
-    change port counts. Verify with AddressSanitizer as well as the plain build.
+    change port counts. Every dropped packet emits one click_chatter line naming
+    the element and the reason - the log-flood risk from a bad source at line
+    rate is accepted, so do not add throttling. Verify with AddressSanitizer as
+    well as the plain build.
 
 - id: "2"
   title: Give DiameterHeader a real constructor and fix Encap
@@ -29,12 +32,11 @@
   description: >-
     Pad encoded AVPs to a 4-octet boundary and strip that padding when decoding,
     so consecutive AVPs stay aligned. Covers CAP-3 and finding F-7.
-  spec_checkpoint: true
   invoke_dev_with: >-
-    A 5-byte payload must encode to 16 bytes and round-trip unchanged through
-    AvpEncap then AvpDecap. Two consecutive AVPs must decode at the offsets a
-    decoder expects. Zero the padding bytes unless the user answers the open
-    question in SPEC.md differently.
+    A 5-byte payload must encode to 16 bytes, with zeroed padding, and round-trip
+    unchanged through AvpEncap then AvpDecap. Two consecutive AVPs must decode at
+    the offsets a decoder expects. Zero the padding (RFC 6733 §4); the decoder
+    derives the padding length from AVP Length and must not depend on its content.
 
 - id: "4"
   title: Fix RANDALPHANUMSTRING length and the hex alphabet

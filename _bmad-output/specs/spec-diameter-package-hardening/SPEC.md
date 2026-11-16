@@ -22,7 +22,7 @@ A pain to solve, with a correctness mandate behind it. The `click-diameter` pack
   - **success:** Byte assertions on encap output show version `1`, Length equal to the packet length, and identical header bytes across repeated runs.
 - **CAP-3**
   - **intent:** AVP encoding and decoding preserve 4-octet alignment, so a receiver can walk a sequence of AVPs without losing its place.
-  - **success:** A 5-byte payload encodes to 16 bytes, AvpEncap then AvpDecap returns the original payload, and two consecutive AVPs decode at the offsets a decoder expects.
+  - **success:** A 5-byte payload encodes to 16 bytes with zeroed padding, AvpEncap then AvpDecap returns the original payload, and two consecutive AVPs decode at the offsets a decoder expects.
 - **CAP-4**
   - **intent:** The argument surface produces exactly what the argument names promise, including the requested random string length and a hex alphabet with no out-of-range characters.
   - **success:** `RANDALPHANUMSTRING 1` yields a 9-byte AVP, `RANDALPHANUMSTRING 8` yields 16 bytes of data, and a 10 kB sample contains no `G` or `g`.
@@ -46,14 +46,14 @@ A pain to solve, with a correctness mandate behind it. The `click-diameter` pack
 - Existing `.click` configurations must keep working; if a fix requires changing an element name, argument or port count, update the configs in the same change.
 - Every package target the Makefile declares (userlevel, linuxmodule, bsdpkg) stays compilable; no userlevel-only headers in packet data-path code.
 - Zero warnings at `-Wall -Wextra`, with no new third-party dependency.
-- Malformed input is dropped, never forwarded as an empty or partial packet, and never repaired into a plausible-looking message.
+- Malformed input is dropped, never forwarded as an empty or partial packet, and never repaired into a plausible-looking message; each drop emits a one-line warning naming the element and the reason.
 
 ## Non-goals
 
 - No new elements, no Diameter dictionary or AVP type database, no connection or session state machine.
 - No SCTP or TCP transport, retransmission, or peer state; elements remain stateless packet transformers.
-- No performance work and no CI pipeline.
-- No redesign of the argument syntax or element graph; the public surface is fixed by constraint.
+- No performance work and no CI pipeline work in this spec; CI is tracked by its own spec.
+- No redesign of the argument syntax or element graph; a fix changes them only where it must, with dependent configs updated.
 
 ## Success signal
 
@@ -62,10 +62,9 @@ On a clean upstream-master install, the package builds with zero warnings, the f
 ## Assumptions
 
 - Port counts in the generated elementmap (1/1, with 1/2 for `DiameterPopStorePushAVP`) describe the current shape; a fix may change them only if the `.click` configs relying on that shape change in the same commit.
-- A zero-length AVP and a declared length larger than the packet are malformed input, not legitimate data, so dropping is acceptable.
+- A zero-length AVP and a declared length larger than the packet are invalid data — RFC 6733 §4.1 (AVP Length at least 8, or 12 with `V`) and §3 (Length covers the whole message) — so dropping, rather than answering with an error message, is the choice these stateless elements make.
 - Happy-path wire behavior is correct except where `findings.md` says otherwise; no other byte-level format change is intended.
 
 ## Open Questions
 
-- Should AVP encoder padding bytes be zeroed? RFC 6733 requires receivers to ignore padding but does not mandate zero, and stacks differ on whether nonzero padding is tolerated.
-- On a short packet or inconsistent length field, should the element drop silently or also log an error? Both fit the current shape; adding an error output would change port counts and the configs that rely on them.
+None. Both were resolved on 2026-11-16: padding is zeroed per RFC 6733 §4, and every dropped packet warns.
