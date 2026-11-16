@@ -12,6 +12,92 @@
 #include "diameter.hh"
 CLICK_DECLS
 
+/*
+=c
+
+DiameterRatedSource(CODE, REQUEST, I<keywords> RATE, LIMIT, ACTIVE, APPID, STOP)
+
+=s basicsources
+
+generates bare Diameter messages at a fixed rate
+
+=d
+
+Creates 20-octet Diameter messages with no AVPs and emits them from its single
+output at RATE packets per second. Every message carries version 1, Length 20,
+the Command Code CODE and the Application-Id APPID, and draws fresh hop-by-hop
+and end-to-end identifiers from click_random(). The E, P and T bits are always
+clear, so a generated request carries R alone and a generated answer carries no
+flag at all. Nothing is padded: a message without AVPs needs no pad octets.
+
+CODE and REQUEST are required. RATE, LIMIT and ACTIVE may also be given as
+positional arguments, in that order; APPID and STOP are optional keywords,
+defaulting to 0 and false. When the token bucket runs dry a push element
+schedules itself for the time the next packet becomes available, and a pull
+element returns a null packet instead.
+
+Keyword arguments are:
+
+=over 8
+
+=item CODE
+
+Integer. Required. The Command Code written into every message.
+
+=item REQUEST
+
+Boolean. Required. True generates requests, false generates answers.
+
+=item RATE
+
+Integer. Generation rate in packets per second. Default is 10.
+
+=item LIMIT
+
+Integer. Stop after this many messages. A negative value means no limit, which
+is the default.
+
+=item ACTIVE
+
+Boolean. If false the element generates nothing. Default is true.
+
+=item APPID
+
+Integer. Application-Id written into every message. Default is 0.
+
+=item STOP
+
+Boolean. If true, stop the driver once LIMIT messages have been sent. Default
+is false. Meaningless when LIMIT is negative.
+
+=back
+
+=h rate read/write
+
+Returns or sets the generation rate in packets per second.
+
+=h limit read/write
+
+Returns or sets the packet limit. A negative value means no limit, and the
+handler reports -1 for it.
+
+=h active read/write
+
+Makes the element active or inactive. An inactive element generates nothing.
+
+=h count read-only
+
+Returns the number of messages generated since the last reset.
+
+=h reset write-only
+
+Resets the message count to 0 and refills the token bucket.
+
+=a
+
+DiameterEncap, DiameterPushAVP
+*/
+
 class DiameterRatedSource : public Element
 {
 public:

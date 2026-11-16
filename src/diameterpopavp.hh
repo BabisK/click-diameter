@@ -9,6 +9,35 @@
 #include "diameter.hh"
 CLICK_DECLS
 
+/*
+=c
+
+DiameterPopAVP()
+
+=s basicmod
+
+removes the last AVP from each Diameter message
+
+=d
+
+Removes the final AVP from a well-formed Diameter message, including its zero
+pad octets, and subtracts the AVP's padded length from the message Length
+field. A message that carries no AVPs has nothing to pop and is forwarded
+unchanged, header and all; nothing else about the message is rewritten.
+
+The message is validated before the AVP is removed, so a malformed packet is
+dropped rather than rewritten: the element prints one
+C<DiameterPopAVP: dropping malformed packet: REASON> line when the packet is
+shorter than the 20-octet header, when its Length field does not equal the
+packet length, when an AVP in it is malformed or runs past the message end, or
+when the flags are illegal for the message type. The element takes no
+arguments.
+
+=a
+
+DiameterPushAVP, DiameterPopStorePushAVP, DiameterAvpDecap
+*/
+
 class DiameterPopAVP : public Element
 {
 public:

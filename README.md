@@ -17,8 +17,11 @@ Requirements
 ------------
 
 - Click 2.1 (upstream `kohler/click` master) with the userlevel driver.
-- A C++ compiler, `autoconf` and `make`. Building Click itself also needs
-  `libpcap-dev`.
+- A C++ compiler, `autoconf`, `make` and `perl`. Building Click itself also
+  needs `libpcap-dev`; `perl` runs the `click-elem2man` that Click installs,
+  which renders the element man pages at install time.
+- `bats-core` 1.5 or newer to run the test suite. On Debian and Ubuntu it comes
+  from `apt-get install -y bats`.
 - Linux or WSL. Click has no Windows build; the macOS and FreeBSD module
   targets are configured here but are not exercised by CI.
 
@@ -63,14 +66,21 @@ Both flags matter:
   prefix will find them. Without `--prefix` the package installs to
   `/usr/local`, which usually fails on permissions.
 
+`make install` also renders the element man pages with the `click-elem2man` that
+the Click install provides: one `Diameter*.7click.gz` page per element plus
+`elements-diameter.7click.gz`, all in `PREFIX/share/man/man7`. They are
+generated from the `=c`/`=d` blocks in `src/`, so there is nothing to commit and
+nothing to keep in step by hand.
+
 ### 3. Check it works
 
 ```sh
 bats --tap tests                          # or: CLICK=$HOME/click/bin/click bats --tap tests
 ```
 
-That runs the smoke configs against an installed package and asserts the bytes;
-see [tests/README.md](tests/README.md).
+That runs the test suite against an installed package: the smoke configs assert
+exact bytes, and `manpages.bats` asserts the pages `make install` rendered. See
+[tests/README.md](tests/README.md).
 
 Using it
 --------
@@ -172,6 +182,27 @@ Element reference
 | `DiameterAvpEncap` | 1/1 | `CODE` (required); `VENDORID`, `MANDATORY` | Prepends an AVP header (8 bytes, or 12 with `VENDORID`) and pads the AVP to a 4-octet boundary |
 | `DiameterAvpDecap` | 1/1 | — | Strips one AVP: consumes the AVP whole when octets follow it, otherwise forwards its value (header 8 bytes, or 12 following the V bit; padding dropped either way) |
 
+Documentation
+-------------
+
+The pages installed with the package sit in `PREFIX/share/man/man7`, beside
+Click's own, and `elements-diameter.7click.gz` lists all nine with a one-line
+summary. Each element page carries its synopsis, ports, arguments, and its drop,
+flag and padding contract; `DiameterRatedSource` adds its handlers.
+
+When the prefix is on your `MANPATH`, `man` finds them as usual:
+
+```sh
+man DiameterEncap
+```
+
+When it is not, point `man` at the prefix explicitly:
+
+```sh
+man -M "$HOME/click/share/man" DiameterEncap
+man -M "$HOME/click/share/man" elements-diameter
+```
+
 Tests
 -----
 
@@ -184,8 +215,13 @@ CLICK=$HOME/click/bin/click bats --tap tests   # this package installed there
 output. The `malformed-*` configs assert the drop path instead — exit 0, one
 warning naming the element and reason, and no `Print` line. The two rejected
 `DiameterEncap` flag configs assert a configure failure: non-zero exit, the
-argument named in the error, and no `Print` line. CI runs the same command
-on every pull request plus a monthly check against upstream Click master.
+argument named in the error, and no `Print` line. `tests/manpages.bats` reads
+the prefix the Click binary lives in and asserts one page per element, with its
+arguments, handlers and the package element list, whose entries sit under a
+known category with a summary; it also checks that the six readers document
+their drop path and the two pop elements their no-AVP no-op. CI runs the same
+command on every pull request plus a monthly check against upstream Click
+master.
 
 Malformed input is dropped, never forwarded. The six elements that read a
 received frame — `DiameterDecap`, `DiameterAvpDecap`, `DiameterFlipRequest`,
@@ -252,16 +288,20 @@ multi-threaded router's interleaving is not fixed by the seed.
 Known limitations
 -----------------
 
-The remaining findings — the absent man pages, the README recipe, the package
-identity and the fork leftovers — have a file-and-line description and a
-reproduction in `_bmad-output/specs/spec-diameter-package-hardening/findings.md`.
+Three findings remain, each with a file-and-line description and a reproduction
+in `_bmad-output/specs/spec-diameter-package-hardening/findings.md`: the package
+identity (`AC_INIT(click-diameterpackage, 2.0.1)`, F-14), the stale include
+guards, the `<iostream>` includes in data-path elements and the dead
+`simple_action()` beside `push()` (F-15), and the Click fork that still carries
+an in-tree copy of these elements beside a `conf/test.click` that does not
+configure (F-16).
 
 Layout
 ------
 
     configure.ac, Makefile.in   build entry points (autoconf, configure, make run here)
     src/                        element sources: one .cc/.hh pair per element, plus diameter.hh
-    tests/                      smoke configs and byte-level assertions
+    tests/                      smoke configs, byte-level assertions and man page assertions
 
 License
 -------

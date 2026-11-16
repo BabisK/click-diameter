@@ -1,8 +1,8 @@
 # tests
 
-Click configs that exercise the package, with byte-level assertions. There is
-no `make check`; these run against an installed Click that already carries
-`diameter.uo`.
+Click configs that exercise the package, with byte-level assertions, plus
+assertions over the man pages the install renders. There is no `make check`;
+these run against an installed Click that already carries `diameter.uo`.
 
 ## Running
 
@@ -24,6 +24,24 @@ silent pass. A config that sets no seed varies its `hbh`/`e2e` identifiers per
 run, so the test matches them with a regex instead of pinning them, and the
 `encap` test runs its config a second time to check that every other field comes
 back byte for byte.
+
+`manpages.bats` reads the pages `make install` rendered into the same installed
+prefix. It resolves the prefix from the Click binary — `$CLICK`, or `click` on
+`PATH`, through `readlink -f` and two `dirname`s — and then walks
+`PREFIX/share/man/man7`: nine `Diameter*.7click.gz` element pages must exist,
+beside `elements-diameter.7click.gz`. Every page must name its element, carry
+the generated `Ports`, `Processing` and `Package: diameter` lines, have a
+non-empty DESCRIPTION and name each argument its header parses in both the
+SYNOPSIS and the DESCRIPTION; `DiameterRatedSource` must list its five handlers,
+and the element list must file all nine under one of the three known categories
+— `Basic Sources and Sinks`, `Basic Packet Transfer`, `Basic Packet
+Modification` — each with a non-empty summary line. The drop path of the six
+readers and the no-AVP no-op of the two pop elements are asserted too. The
+pages come from the `=c`/`=d` blocks in `src/`, so a header with no block, or
+one whose block no longer names an argument the header parses, fails the run;
+an argument added to a `configure()` that the page does not mention is caught
+at review instead. When the prefix is not on `MANPATH`, read a page with
+`man -M PREFIX/share/man DiameterEncap`.
 
 The `randomness-*` configs pin `RandomSeed(SEED 12345)`, and their assertions
 live in `expect_seeded`, the seeded counterpart of `expect_drop` and
