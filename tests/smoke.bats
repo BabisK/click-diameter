@@ -5,12 +5,17 @@
 #   bats --tap tests                              # click from PATH
 #   CLICK=~/click/bin/click bats --tap tests      # explicit binary
 #
-# Requires bats-core. Every expectation below pins the bytes the element emits
-# today, so a change in them fails the run. Octets that are deliberately random
-# -- the hbh/e2e identifiers of F-11 -- are matched with a regex instead of
-# compared exactly, and the encap test runs its config a second time to check
-# that every other field comes back byte for byte. The rand-* tests pin the
-# length and the alphabet of each DiameterPushAVP generator. The avp-padding*
+# Requires bats-core 1.5 or newer (the seeded tests use BATS_TEST_TMPDIR) and a
+# Click that carries the RandomSeed test element. Every expectation below pins
+# the bytes the element emits today, so a change in them fails the run. A
+# config that sets no RandomSeed varies its hbh/e2e identifiers per run, so the
+# test matches them with a regex instead of pinning them, and the encap test
+# runs its config a second time to check that every other field comes back byte
+# for byte. The randomness-* configs pin RandomSeed(SEED 12345) and require the
+# two packets of a run to differ, a rewritten seed to change the octets, and a
+# rerun over a second later to reproduce the first run byte for byte, so a
+# clock-seeded stream fails. The rand-* tests pin the length and the alphabet of
+# each DiameterPushAVP generator. The avp-padding*
 # and avp-decap-* tests pin the 4-octet AVP alignment of RFC 6733 section 4.1
 # and the rule that the decoder derives padding from Length alone. The
 # malformed-* tests assert the drop path instead: exit 0, one warning naming the
@@ -21,13 +26,18 @@
 click=${CLICK:-click}
 click_timeout=${CLICK_TIMEOUT:-10}
 
+# run_config PATH -- run a config at PATH under a timeout, capturing the output.
+run_config() {
+	if command -v timeout >/dev/null 2>&1; then
+		run timeout "$click_timeout" "$click" "$1"
+	else
+		run "$click" "$1"
+	fi
+}
+
 # run_click CONFIG -- run configs/CONFIG under a timeout, capturing the output.
 run_click() {
-	if command -v timeout >/dev/null 2>&1; then
-		run timeout "$click_timeout" "$click" "$BATS_TEST_DIRNAME/configs/$1"
-	else
-		run "$click" "$BATS_TEST_DIRNAME/configs/$1"
-	fi
+	run_config "$BATS_TEST_DIRNAME/configs/$1"
 }
 
 # expect OUTPUT -- the whole captured output, byte for byte.
@@ -52,6 +62,43 @@ expect_configure_failure() {
 	[ "$status" -ne 0 ] || { echo "expected a configure failure, click exit $status"; return 1; }
 	local expected="$BATS_TEST_DIRNAME/configs/$1":*": While configuring 'DiameterEncap@2 :: DiameterEncap':"$'\n'"  $2"$'\n'"Router could not be initialized!"
 	[[ "$output" == $expected ]] || { echo "expected: $expected"; echo "got: $output"; return 1; }
+}
+
+# expect_seeded CONFIG LENGTH -- the RandomSeed(SEED 12345) contract for
+# configs/CONFIG: rejection of a clock-seeded stream. Each of the two packets in
+# the run must be LENGTH octets and the two must differ, because the stream
+# advances rather than repeating one value. A copy with the seed rewritten must
+# print different octets, so the seed rather than the clock or a constant
+# decides. A rerun more than a second later must reproduce the first run byte
+# for byte; two wall-clock-seeded runs in the same second agree, so the sleep is
+# what makes a reseeded stream fail here instead of passing by accident.
+expect_seeded() {
+	local config="$BATS_TEST_DIRNAME/configs/$1"
+	run_config "$config"
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	local first_run="$output"
+	local lines
+	mapfile -t lines <<<"$first_run"
+	[ "${#lines[@]}" -eq 2 ] || { echo "expected two packets, got ${#lines[@]}"; return 1; }
+	local lengths
+	lengths=$(awk '{ print $2 }' <<<"$first_run" | sort -u)
+	[ "$lengths" = "$2" ] || { echo "expected $2-octet packets, got lengths: $lengths"; return 1; }
+	[ "${lines[0]}" != "${lines[1]}" ] || { echo "expected the two packets to differ"; return 1; }
+
+	local other="$BATS_TEST_TMPDIR/$1"
+	sed -E 's/(RandomSeed\(SEED )[0-9]+\)/\154321)/' "$config" >"$other"
+	if cmp -s "$config" "$other"; then
+		echo "could not rewrite the seed in $1: no numeric RandomSeed(SEED n) found"
+		return 1
+	fi
+	run_config "$other"
+	[ "$status" -eq 0 ] || { echo "click exit $status with the rewritten seed"; return 1; }
+	[ "$output" != "$first_run" ] || { echo "expected a different seed to print different octets"; return 1; }
+
+	sleep 1.1
+	run_config "$config"
+	[ "$status" -eq 0 ] || { echo "click exit $status on the rerun"; return 1; }
+	[ "$output" = "$first_run" ] || { echo "expected the rerun to reproduce the first run byte for byte"; return 1; }
 }
 
 @test "push-avp: appending an AVP, header length updated" {
@@ -212,7 +259,8 @@ expect_configure_failure() {
 	run_click avp-encap-message.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
 	# The encoder's padded AVP is accepted by PopAVP, which walks the padded
-	# AVP and restores a header-only 20-octet message. Identifiers are random.
+	# AVP and restores a header-only 20-octet message. The config sets no seed,
+	# so the identifiers vary per run and the test regexes them.
 	local expected='^message: +36 \| 01000024 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 0000000d 61626364 65000000
 pop: +20 \| 01000014 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8}$'
 	[[ "$output" =~ $expected ]] || { echo "expected: the 36-octet message, then the 20-octet header-only frame"; return 1; }
@@ -298,7 +346,7 @@ pop: +20 \| 01000014 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8}$'
 	run_click encap.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
 	# F-4: version, Length, flags, code and App-Id are asserted exactly; only the
-	# random hbh/e2e of F-11 are regexed.
+	# unseeded hbh/e2e are regexed.
 	local expected='^encap: +24 \| 01000018 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} deadbeef$'
 	[[ "$output" =~ $expected ]] || { echo "expected: 24 octets, version 1, Length 24, then the payload"; return 1; }
 	# REPEATED_RUNS: a second run must agree on every field that is not random.
@@ -330,8 +378,8 @@ decap: +4 \| deadbeef$'
 	run_click encap-push-pop.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
 	# 28 octets in (header plus one 8-octet AVP), 16 padded AVP octets appended
-	# (Length 0x2c), then popped again (Length 0x1c). Only the identifiers
-	# (F-11) vary.
+	# (Length 0x2c), then popped again (Length 0x1c). Only the unseeded
+	# identifiers vary.
 	local expected='^encap: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
 push: +44 \| 0100002c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008 00000108 0000000d 61626364 65000000
 pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008$'
@@ -393,6 +441,26 @@ pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
 	local expected='^rated-source-answer: +20 \| 01000014 00000118 0000002a [0-9a-f]{8} [0-9a-f]{8}$'
 	[[ "$output" =~ $expected ]] || { echo "expected: 20 octets, version 1, Length 20, flags 00, code 000118, App-Id 0000002a"; return 1; }
+}
+
+@test "randomness-encap: RandomSeed reproduces the identifiers across runs" {
+	expect_seeded randomness-encap.click 24
+}
+
+@test "randomness-rated-source: RandomSeed reproduces the identifiers across runs" {
+	expect_seeded randomness-rated-source.click 20
+}
+
+@test "randomness-push-avp: RandomSeed reproduces the generated value across runs" {
+	expect_seeded randomness-push-avp.click 36
+}
+
+@test "randomness-push-avp-uint32: RandomSeed reproduces the generated value across runs" {
+	expect_seeded randomness-push-avp-uint32.click 32
+}
+
+@test "randomness-rated-source-pull: RandomSeed reproduces the pull path's identifiers across runs" {
+	expect_seeded randomness-rated-source-pull.click 20
 }
 
 @test "popstorepush-roundtrip: unpadded AVP pop then push restores the message" {
@@ -513,4 +581,20 @@ pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
 	run_click no-avp.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
 	expect $'pop-avp:   20 | 01000014 80000118 00000000 00000001 00000002\npop-store-push:   20 | 01000014 80000118 00000000 00000001 00000002'
+}
+
+@test "randomness-source: no element calls srand, rand, srandom, random, click_srandom or click_random_srandom" {
+	# F-11 lives in configure(), which no byte assertion can see. Ban every
+	# reseed form (click_srandom, click_random_srandom) and every bare C RNG
+	# call (srand, rand, srandom, random); draining the stream through
+	# click_random() is the only allowed use. A word boundary keeps the bare
+	# forms from matching click_random().
+	local src="$BATS_TEST_DIRNAME/../src"
+	[ -d "$src" ] || { echo "missing source directory: $src"; return 1; }
+	local hits status=0
+	hits=$(grep -rnE '\b(s?rand|s?random|click_srandom|click_random_srandom)[[:space:]]*\(' "$src") || status=$?
+	# grep exits 1 when it finds nothing, which is the pass case. Exit 2 is an
+	# unreadable tree and must not be mistaken for a clean scan.
+	[ "$status" -le 1 ] || { echo "could not scan $src (grep exit $status)"; return 1; }
+	[ -z "$hits" ] || { echo "banned RNG call in src/: $hits"; return 1; }
 }

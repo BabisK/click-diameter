@@ -24,7 +24,6 @@ DiameterRatedSource::DiameterRatedSource()
 int
 DiameterRatedSource::configure(Vector<String> &conf, ErrorHandler *errh)
 {
-	srand(time(NULL));
     String data =
 	"Random bullshit in a packet, at least 64 bytes long. Well, now it is.";
     unsigned rate = 10;
@@ -94,8 +93,8 @@ DiameterRatedSource::run_task(Task *)
 	return false;
     }
 
-    dh.setHbh(rand());
-    dh.setE2e(rand());
+    dh.setHbh(click_random());
+    dh.setE2e(click_random());
 
     _tb.refill();
     if (_tb.remove_if(1)) {
@@ -125,8 +124,8 @@ DiameterRatedSource::pull(int)
 	return 0;
     }
 
-    dh.setHbh(rand());
-    dh.setE2e(rand());
+    dh.setHbh(click_random());
+    dh.setE2e(click_random());
 
     _tb.refill();
     if (_tb.remove_if(1)) {

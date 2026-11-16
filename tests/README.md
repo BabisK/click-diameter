@@ -6,8 +6,10 @@ no `make check`; these run against an installed Click that already carries
 
 ## Running
 
-Requires [bats-core](https://github.com/bats-core/bats-core) — on the CI image
-it comes from `apt-get install -y bats`.
+Requires [bats-core](https://github.com/bats-core/bats-core) 1.5 or newer — the
+seeded tests use `BATS_TEST_TMPDIR` — and a Click that carries the `RandomSeed`
+test element, which the `randomness-*` configs load. On the CI image bats comes
+from `apt-get install -y bats`.
 
 ```sh
 bats --tap tests                              # click from PATH
@@ -18,14 +20,31 @@ CLICK=~/click/bin/click bats --tap --filter pop-avp tests   # one config
 `smoke.bats` runs every config under `configs/` with a 10 s timeout, then
 asserts the bytes the config printed: label, packet length and hex contents. A
 wrong length field, a changed flag or an off-by-one is a failed test, not a
-silent pass. The octets that are deliberately random — the `hbh`/`e2e`
-identifiers of F-11 — are matched with a regex instead of pinned, and the
+silent pass. A config that sets no seed varies its `hbh`/`e2e` identifiers per
+run, so the test matches them with a regex instead of pinning them, and the
 `encap` test runs its config a second time to check that every other field comes
-back byte for byte. The `rand-*` tests pin the length and the alphabet of each
-`DiameterPushAVP` generator; one of them appends 10 kB to the packet, so Click
-prints its `expensive Packet::put` advisory beside the `Print` line. The
-`malformed-*` configs assert the drop path instead: exit 0, no `Print` line,
-and exactly one warning naming the element and reason.
+back byte for byte.
+
+The `randomness-*` configs pin `RandomSeed(SEED 12345)`, and their assertions
+live in `expect_seeded`, the seeded counterpart of `expect_drop` and
+`expect_configure_failure`: each config runs once, then with the seed rewritten
+in a copy, then again more than a second later, and requires the two packets of
+a run to differ, the two seeds to differ, and the rerun to reproduce the first
+run byte for byte. A stream seeded from the wall clock, frozen after one draw or
+ignoring the seed fails that. Five configs cover every drawing path changed by
+F-11: `randomness-encap` and `randomness-rated-source` for the generated
+identifiers, `randomness-rated-source-pull` for the pull path,
+`randomness-push-avp` for the generated string and
+`randomness-push-avp-uint32` for `RANDUINT32`. The `randomness-source` test is
+not a config: it greps `src/` and fails on any `srand`, `rand`, `srandom`,
+`random`, `click_srandom` or `click_random_srandom` call, so a reintroduced
+reseed fails even though no byte assertion can see `configure()`.
+
+The `rand-*` tests pin the length and the alphabet of each `DiameterPushAVP`
+generator; one of them appends 10 kB to the packet, so Click prints its
+`expensive Packet::put` advisory beside the `Print` line. The `malformed-*`
+configs assert the drop path instead: exit 0, no `Print` line, and exactly one
+warning naming the element and reason.
 
 Malformed input is dropped, never forwarded. A drop is asserted with
 `expect_drop`, which requires exit 0, exactly one warning of the form
@@ -95,6 +114,11 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `encap-retransmit-on-answer.click` | `RETRANSMITED true` on an answer rejected at configure time (RFC 6733 §3) |
 | `rated-source.click` | a generated message is 20 octets: version 1, Length 20, flags `80`, code `000118`, App-Id 42 |
 | `rated-source-answer.click` | a generated answer is 20 octets with flags `00`: E, P and T clear |
+| `randomness-encap.click` | `RandomSeed(SEED 12345)` with `DiameterEncap`: two 24-octet frames, reproduced across runs, identifiers differ (F-11) |
+| `randomness-rated-source.click` | `RandomSeed(SEED 12345)` with `DiameterRatedSource`: two 20-octet frames, reproduced across runs, identifiers differ (F-11) |
+| `randomness-push-avp.click` | `RandomSeed(SEED 12345)` with `DiameterPushAVP(RANDHEXSTRING 8)`: two 36-octet frames, reproduced across runs, values differ (F-11) |
+| `randomness-push-avp-uint32.click` | `RandomSeed(SEED 12345)` with `DiameterPushAVP(RANDUINT32 true)`: two 32-octet frames, reproduced across runs, values differ (F-11) |
+| `randomness-rated-source-pull.click` | `RandomSeed(SEED 12345)` with `Unqueue` forcing `DiameterRatedSource`'s pull path: two 20-octet frames, reproduced across runs, identifiers differ (F-11) |
 | `popstorepush-roundtrip.click` | popping an unpadded AVP and pushing it back restores the 44-octet message (F-1) |
 | `no-avp.click` | a header-only message forwarded unchanged by both pop elements |
 | `malformed-short-packet.click` | a 4-octet packet dropped by `DiameterDecap` (F-6) |

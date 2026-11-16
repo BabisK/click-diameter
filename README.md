@@ -228,15 +228,33 @@ not errors, so the readers that only validate forward them unchanged. T on a
 request is never rejected: §3 allows it only as a retransmission marker, and a
 stateless element cannot judge that.
 
+Randomness
+----------
+
+`DiameterRatedSource`, `DiameterEncap` and `DiameterPushAVP` draw every random
+field from Click's RNG through `click_random()`: the `hbh`/`e2e` identifiers of
+a generated header and the `RAND*` values of `DiameterPushAVP`. None of them
+seeds the generator. `RandomSeed(SEED n)` replaces Click's per-router random
+seed:
+
+```click
+RandomSeed(SEED 12345);
+```
+
+The seed is process-global, so it also pins every other element drawing from
+`click_random()`, and its position in the configuration does not matter because
+the elements draw only at run time. Two runs of the same config then emit the
+same octets. The stream advances on every draw, so successive packets still
+differ; without a seed the values come from Click's own seed and vary from run
+to run. Reproduction assumes a single thread or a fixed draw order: a
+multi-threaded router's interleaving is not fixed by the seed.
+
 Known limitations
 -----------------
 
-`DiameterRatedSource`, `DiameterEncap` and `DiameterPushAVP` still seed the C
-library RNG with `srand(time(NULL))` and draw from `rand()`, so a run cannot be
-reproduced from a seed (F-11). The remaining findings — the absent man pages,
-the README recipe, the package identity and the fork leftovers — have a
-file-and-line description and a reproduction in
-`_bmad-output/specs/spec-diameter-package-hardening/findings.md`.
+The remaining findings — the absent man pages, the README recipe, the package
+identity and the fork leftovers — have a file-and-line description and a
+reproduction in `_bmad-output/specs/spec-diameter-package-hardening/findings.md`.
 
 Layout
 ------
