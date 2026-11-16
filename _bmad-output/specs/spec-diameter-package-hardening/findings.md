@@ -39,6 +39,7 @@ Severity is impact if the defect reaches a user, not effort to fix. Capability l
 - **Where:** `src/diameterratedsource.cc:68-72`
 - **Symptom:** generated requests show flags `0xe0` â€” E=1 on a request.
 - **Cause:** `proxiable`, `error`, and `retransmitted` are never assigned, so their values are whatever the backing struct holds.
+- **Resolution (2026-11-16):** story 2's `DiameterHeader` constructor initializes all three bits and story 5 pins flags `80` on a generated request and `00` on a generated answer.
 - **Capability:** CAP-5
 
 ## F-6 â€” Decapsulators do not length-check (high)
@@ -68,10 +69,12 @@ Severity is impact if the defect reaches a user, not effort to fix. Capability l
 - **Symptom (source inspection):** the literal is `"0123456789ABCDEFG" "abcdefg"`, so generation can emit `G`/`g` and duplicates A-F in both cases.
 - **Capability:** CAP-4
 
-## F-10 â€” `DiameterFlipRequest` flips only R (medium)
+## F-10 - `DiameterFlipRequest` mishandles P, E and T (medium)
 
-- **Where:** `src/diameterfliprequest.cc`
-- **Symptom:** a request's flags go `0x80` to `0x00`; an answer keeps P=1, which RFC 6733 Â§3 forbids (P is meaningful only on requests).
+- **Where:** `src/diameterfliprequest.cc`, `src/diameterencap.cc`, `src/diameter.hh:318-335`
+- **Symptom (observed on the 2026-11-16 baseline):** a request's flags go `0x80` to `0x00` and every other bit is left alone, so a proxiable request loses its P when it becomes an answer (a `c0` request printed `40` only after the fix; it printed `00` before), a request carrying T becomes an answer that still carries T (`90` printed `10`), and the reverse flip turns an error answer into a request that still carries E (`20` printed `a0`). `DiameterEncap` likewise accepts `RETRANSMITED true` on an answer and emitted flags `10`.
+- **RFC:** 6733 §3 - E MUST NOT be set in request messages and T MUST NOT be set in answer messages; §6.2 - an answer's P is set to the same value as the one in the request.
+- **Resolution (2026-11-16, user direction):** the flip keeps P in both directions, clears T when it produces an answer and clears E when it produces a request; `diameter_check_header` drops a received E-on-request or T-on-answer for every message reader; `DiameterEncap` rejects `RETRANSMITED` on an answer instead of `PROXIABLE`.
 - **Capability:** CAP-5
 
 ## F-11 â€” Global RNG reseeding (medium)

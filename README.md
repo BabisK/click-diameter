@@ -148,14 +148,14 @@ InfiniteSource(DATA \<01 00 00 14 c0 00 01 10 00 00 00 04 00 00 00 01
 ```
 
 ```text
-answer:   20 | 01000014 00000110 00000004 00000001 00000002
+answer:   20 | 01000014 40000110 00000004 00000001 00000002
 ```
 
-The flags byte goes from `c0` (`R` and `P` set, a proxiable request) to `00`:
-the flip clears R, and P with it, because this package keeps P off the answers
-it produces. RFC 6733 §6.2 would have an answer mirror the request's P; §3
-agrees only that E must not appear in a request and T must not appear in an
-answer.
+The flags byte goes from `c0` (`R` and `P` set, a proxiable request) to `40`:
+the flip clears R and keeps P, because RFC 6733 §6.2 sets an answer's P to the
+same value as the request's. The other two bits are policed in the same pass: T
+is cleared when a request becomes an answer and E when an answer becomes a
+request, per §3.
 
 Element reference
 -----------------
@@ -163,12 +163,12 @@ Element reference
 | Element | In/out | Arguments | What it does |
 |---|---|---|---|
 | `DiameterRatedSource` | 0/1 | `CODE`, `REQUEST` (required); `RATE` (pps, default 10), `LIMIT`, `ACTIVE`, `APPID`, `STOP` | Emits bare 20-byte messages at a token-bucket rate; it never sets E, P or T, so a generated request carries R alone and a generated answer none |
-| `DiameterEncap` | 1/1 | `CODE`, `REQUEST` (required); `ERROR`, `PROXIABLE`, `RETRANSMITED`, `APPID` | Prepends a 20-byte Diameter header to the packet; rejects `ERROR` on a request and `PROXIABLE` on an answer at configure time |
-| `DiameterDecap` | 1/1 | — | Strips the 20-byte header |
-| `DiameterPushAVP` | 1/1 | `CODE` (required); `VENDORSPEC`, `VENDOR`; one of `OCTETSTRING`, `UINT32`, `RANDUINT32`, `RANDALPHANUMSTRING N`, `RANDNUMSTRING N`, `RANDALPHASTRING N`, `RANDHEXSTRING N` | Appends an AVP and updates the message Length |
-| `DiameterPopAVP` | 1/1 | — | Removes the last AVP and updates the message Length |
-| `DiameterPopStorePushAVP` | 1/2 | — | Pops the last AVP from one packet (output 0) and pushes that value back onto the next (output 1) |
-| `DiameterFlipRequest` | 1/1 | — | Toggles the request bit, turning a request into an answer and back; a flip to an answer clears R and P, a flip to a request sets R and leaves P |
+| `DiameterEncap` | 1/1 | `CODE`, `REQUEST` (required); `ERROR`, `PROXIABLE`, `RETRANSMITED`, `APPID` | Prepends a 20-byte Diameter header to the packet; accepts `PROXIABLE` on either type and rejects `ERROR` on a request and `RETRANSMITED` on an answer at configure time |
+| `DiameterDecap` | 1/1 | — | Strips the 20-byte header; validates the message first |
+| `DiameterPushAVP` | 1/1 | `CODE` (required); `VENDORSPEC`, `VENDOR`; one of `OCTETSTRING`, `UINT32`, `RANDUINT32`, `RANDALPHANUMSTRING N`, `RANDNUMSTRING N`, `RANDALPHASTRING N`, `RANDHEXSTRING N` | Appends an AVP and updates the message Length; validates the message first |
+| `DiameterPopAVP` | 1/1 | — | Removes the last AVP and updates the message Length; validates the message first |
+| `DiameterPopStorePushAVP` | 1/2 | — | Pops the last AVP from one packet (output 0) and pushes that value back onto the next (output 1); validates the message first |
+| `DiameterFlipRequest` | 1/1 | — | Toggles the request bit, turning a request into an answer and back; P is kept in both directions, T is cleared when it produces an answer and E when it produces a request |
 | `DiameterAvpEncap` | 1/1 | `CODE` (required); `VENDORID`, `MANDATORY` | Prepends an AVP header (8 bytes, or 12 with `VENDORID`) and pads the AVP to a 4-octet boundary |
 | `DiameterAvpDecap` | 1/1 | — | Strips one AVP: consumes the AVP whole when octets follow it, otherwise forwards its value (header 8 bytes, or 12 following the V bit; padding dropped either way) |
 
@@ -190,9 +190,10 @@ on every pull request plus a monthly check against upstream Click master.
 Malformed input is dropped, never forwarded. The six elements that read a
 received frame — `DiameterDecap`, `DiameterAvpDecap`, `DiameterFlipRequest`,
 `DiameterPushAVP`, `DiameterPopAVP` and `DiameterPopStorePushAVP` — validate it
-first and drop it with one `ELEMENT: dropping malformed packet: REASON` line
-per packet. Drops are not throttled: a hostile source can flood the log, and
-that is accepted.
+first and drop it with one `ELEMENT: dropping malformed packet: REASON` line per
+packet: the five that read a message check its Length and flags, and
+`DiameterAvpDecap` checks the AVP framing it is handed. Drops are not throttled:
+a hostile source can flood the log, and that is accepted.
 
 AVPs are padded to a 4-octet boundary with zero octets, and the AVP Length
 counts only the header and the value (RFC 6733 §4.1). `DiameterAvpEncap` adds
@@ -204,28 +205,37 @@ padding still decodes to its value rather than being dropped.
 Flag policy
 -----------
 
-RFC 6733 §3 forbids E in a request and T in an answer; P has no rule there,
-and §6.2 makes an answer copy the request's P. The construction side of this
-package enforces a stricter rule of its own: no E on a request, and no P on an
-answer. `DiameterRatedSource` never sets E, P or T, so a generated request
+RFC 6733 §3 forbids E in a request and T in an answer, and §6.2 sets an
+answer's P to the same value as the request's. The package builds and reads
+headers that way.
+
+`DiameterRatedSource` sets none of the three bits, so a generated request
 carries R alone and a generated answer none. `DiameterEncap` starts from a
 header whose flags are all clear, sets only the flags the caller asks for, and
-rejects `ERROR` on a request and `PROXIABLE` on an answer at configure time
-with an error naming the argument. `DiameterFlipRequest` clears R and P
-together when it turns a request into an answer. Flipping an answer back sets R
-and leaves P as it found it, so a legal answer stays non-proxiable and an
-already-invalid one is not repaired. T is not checked on either side, so an
-answer may still carry it. Flags on a received frame are not validated: only
-its Length and AVP framing are.
+rejects `ERROR` on a request and `RETRANSMITED` on an answer at configure time
+with an error naming the argument; `PROXIABLE` is accepted on either type,
+because the element has no request to consult. `DiameterFlipRequest` clears R
+and T together when it turns a request into an answer, and sets R and clears E
+when it turns an answer into a request, keeping P in both directions.
+
+Every element that reads a message validates the flags alongside its Length
+check, so a received frame carrying E on a request or T on an answer is dropped
+with one warning naming the flag. The flip is the one reader that also rewrites
+flags: it validates at the door, so a T-bearing answer is dropped rather than
+repaired into a request, while an E-bearing answer is legal input and has its E
+cleared on the way out. P on either type, E on an answer and T on a request are
+not errors, so the readers that only validate forward them unchanged. T on a
+request is never rejected: §3 allows it only as a retransmission marker, and a
+stateless element cannot judge that.
 
 Known limitations
 -----------------
 
 `DiameterRatedSource`, `DiameterEncap` and `DiameterPushAVP` still seed the C
 library RNG with `srand(time(NULL))` and draw from `rand()`, so a run cannot be
-reproduced from a seed (F-11). The remaining findings — the T bit on answers,
-the absent man pages, the README recipe, the package identity and the fork
-leftovers — have a file-and-line description and a reproduction in
+reproduced from a seed (F-11). The remaining findings — the absent man pages,
+the README recipe, the package identity and the fork leftovers — have a
+file-and-line description and a reproduction in
 `_bmad-output/specs/spec-diameter-package-hardening/findings.md`.
 
 Layout

@@ -121,6 +121,19 @@ baseline_revision: '94be58a70d7521747e431350b85215c6a9762db3'
 
 ## Spec Change Log
 
+### 2026-11-16 — P rule superseded by user direction
+
+The P clearing that this story's `FLIP_REQUEST_P` row and `DiameterEncap` guard
+enforced is superseded by user direction of 2026-11-16, recorded in
+`_bmad-output/implementation-artifacts/spec-rfc-6733-flag-alignment.md`. The
+amended rule is RFC 6733 §6.2's mirroring plainly: a flip keeps P in both
+directions, clears T when it produces an answer and clears E when it produces a
+request; `DiameterEncap` accepts `PROXIABLE` on either type and rejects
+`RETRANSMITED` on an answer; and every message reader drops a received
+E-on-request or T-on-answer through `diameter_check_header`. This entry is
+append-only — the intent, matrix and review record this file already carries are
+unchanged.
+
 ## Review Triage Log
 
 ### 2026-11-16 — Review pass

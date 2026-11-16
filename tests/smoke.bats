@@ -15,7 +15,7 @@
 # and the rule that the decoder derives padding from Length alone. The
 # malformed-* tests assert the drop path instead: exit 0, one warning naming the
 # element and reason, and no Print line. The two configs the package refuses --
-# ERROR on a request and PROXIABLE on an answer -- assert the configure path:
+# ERROR on a request and RETRANSMITED on an answer -- assert the configure path:
 # Click's whole configure-failure output and no Print line.
 
 click=${CLICK:-click}
@@ -224,10 +224,24 @@ pop: +20 \| 01000014 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8}$'
 	expect 'flip-request:   20 | 01000014 00000118 00000000 00000001 00000002'
 }
 
-@test "flip-request-p: a proxiable request flips to flags 00, P cleared with R" {
+@test "flip-request-p: a proxiable request flips to flags 40, P mirrored" {
 	run_click flip-request-p.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
-	expect 'flip-request-p:   20 | 01000014 00000118 00000000 00000001 00000002'
+	# RFC 6733 section 6.2: an answer's P is the request's P, so R clears and P
+	# stays. A flip that clears P again fails here.
+	expect 'flip-request-p:   20 | 01000014 40000118 00000000 00000001 00000002'
+}
+
+@test "flip-request-t: a retransmitted request flips to flags 00, T cleared with R" {
+	run_click flip-request-t.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	expect 'flip-request-t:   20 | 01000014 00000118 00000000 00000001 00000002'
+}
+
+@test "flip-request-pt: P is mirrored and T cleared, flags d0 to 40" {
+	run_click flip-request-pt.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	expect 'flip-request-pt:   20 | 01000014 40000118 00000000 00000001 00000002'
 }
 
 @test "flip-answer: flipping an answer sets R, flags 00 to 80" {
@@ -242,10 +256,42 @@ pop: +20 \| 01000014 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8}$'
 	expect 'flip-answer-p:   20 | 01000014 c0000118 00000000 00000001 00000002'
 }
 
+@test "flip-answer-e: a flipped error answer clears E, flags 20 to 80" {
+	run_click flip-answer-e.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	expect 'flip-answer-e:   20 | 01000014 80000118 00000000 00000001 00000002'
+}
+
+@test "flip-answer-ep: a flipped proxiable error answer keeps P and clears E, flags 60 to c0" {
+	run_click flip-answer-ep.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	expect 'flip-answer-ep:   20 | 01000014 c0000118 00000000 00000001 00000002'
+}
+
 @test "decap: stripping the 20-byte header leaves the payload" {
 	run_click decap.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
 	expect 'decap:    4 | deadbeef'
+}
+
+@test "decap-p-on-answer: P on an answer is not an error, payload forwarded" {
+	run_click decap-p-on-answer.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# The receive rule polices E and T only; P is legal on either type, so a
+	# guard that dropped P would fail here.
+	expect 'decap-p-on-answer:    4 | deadbeef'
+}
+
+@test "decap-t-on-request: T on a request is not an error, payload forwarded" {
+	run_click decap-t-on-request.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	expect 'decap-t-on-request:    4 | deadbeef'
+}
+
+@test "pop-avp-error-on-answer: E on an answer is forwarded unchanged" {
+	run_click pop-avp-error-on-answer.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	expect 'pop-avp-e:   20 | 01000014 20000118 00000000 00000001 00000002'
 }
 
 @test "encap: version 1, Length counts the header plus the payload" {
@@ -309,8 +355,8 @@ pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
 @test "encap-proxiable-on-request: P is legal on a request, flags c0" {
 	run_click encap-proxiable-on-request.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
-	# The accept side of the P guard: a guard that rejected every PROXIABLE use,
-	# or every request, fails here.
+	# P is legal on either type now, so a guard that rejected PROXIABLE at all
+	# fails here.
 	local expected='^encap-proxiable-on-request: +24 \| 01000018 c0000118 00000000 [0-9a-f]{8} [0-9a-f]{8} deadbeef$'
 	[[ "$output" =~ $expected ]] || { echo "expected: 24 octets, flags c0, code 000118, then the payload"; return 1; }
 }
@@ -320,9 +366,19 @@ pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
 	expect_configure_failure encap-error-on-request.click 'the ERROR argument cannot be set on a request (RFC 6733 section 3)'
 }
 
-@test "encap-proxiable-on-answer: PROXIABLE on an answer fails to configure" {
+@test "encap-proxiable-on-answer: P is legal on either type, flags 40" {
 	run_click encap-proxiable-on-answer.click
-	expect_configure_failure encap-proxiable-on-answer.click 'the PROXIABLE argument cannot be set on an answer (RFC 6733 section 3)'
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# RFC 6733 section 6.2 mirrors a request's P into the answer; Encap has no
+	# request to consult, so the caller's declaration stands. A guard that
+	# rejects PROXIABLE on an answer again fails here.
+	local expected='^encap-proxiable-on-answer: +24 \| 01000018 40000118 00000000 [0-9a-f]{8} [0-9a-f]{8} deadbeef$'
+	[[ "$output" =~ $expected ]] || { echo "expected: 24 octets, flags 40, code 000118, then the payload"; return 1; }
+}
+
+@test "encap-retransmit-on-answer: RETRANSMITED on an answer fails to configure" {
+	run_click encap-retransmit-on-answer.click
+	expect_configure_failure encap-retransmit-on-answer.click 'the RETRANSMITED argument cannot be set on an answer (RFC 6733 section 3)'
 }
 
 @test "rated-source: 20 octets, version 1, Length 20, flags 80, code 000118" {
@@ -418,6 +474,39 @@ pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
 @test "malformed-popstorepush-armed: malformed second pass dropped with an AVP armed" {
 	run_click malformed-popstorepush-armed.click
 	expect_drop DiameterPopStorePushAVP 'header Length does not match packet length'
+}
+
+@test "malformed-error-on-request: E on a request dropped by DiameterDecap" {
+	run_click malformed-error-on-request.click
+	expect_drop DiameterDecap 'the E bit is set on a request'
+}
+
+@test "malformed-error-on-request-message: E on a request dropped by DiameterPopAVP" {
+	run_click malformed-error-on-request-message.click
+	expect_drop DiameterPopAVP 'the E bit is set on a request'
+}
+
+@test "malformed-retransmit-on-answer: T on an answer dropped by DiameterFlipRequest" {
+	run_click malformed-retransmit-on-answer.click
+	expect_drop DiameterFlipRequest 'the T bit is set on an answer'
+}
+
+@test "malformed-error-on-request-push: E on a request dropped by DiameterPushAVP" {
+	run_click malformed-error-on-request-push.click
+	expect_drop DiameterPushAVP 'the E bit is set on a request'
+}
+
+@test "malformed-retransmit-on-answer-popstorepush: T on an answer dropped by DiameterPopStorePushAVP" {
+	run_click malformed-retransmit-on-answer-popstorepush.click
+	expect_drop DiameterPopStorePushAVP 'the T bit is set on an answer'
+}
+
+@test "malformed-error-on-request-length: the Length reason wins over the flag reason" {
+	run_click malformed-error-on-request-length.click
+	# The flag test runs only after the Length matches, so a frame with both
+	# faults reports the Length reason. Hoisting the flag test above the Length
+	# comparison fails here.
+	expect_drop DiameterDecap 'header Length does not match packet length'
 }
 
 @test "no-avp: header-only message forwarded unchanged by both pop elements" {

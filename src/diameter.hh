@@ -282,7 +282,9 @@ enum DiameterCheck {
 	DIAMETER_CHECK_SHORT_VENDOR_AVP_HEADER,
 	DIAMETER_CHECK_LENGTH_MISMATCH,
 	DIAMETER_CHECK_AVP_BELOW_HEADER,
-	DIAMETER_CHECK_AVP_PAST_END
+	DIAMETER_CHECK_AVP_PAST_END,
+	DIAMETER_CHECK_ERROR_ON_REQUEST,
+	DIAMETER_CHECK_RETRANSMITTED_ON_ANSWER
 };
 
 inline const char *diameter_check_reason(DiameterCheck check)
@@ -302,12 +304,17 @@ inline const char *diameter_check_reason(DiameterCheck check)
 		return "AVP length below its header";
 	case DIAMETER_CHECK_AVP_PAST_END:
 		return "AVP extends past the message end";
+	case DIAMETER_CHECK_ERROR_ON_REQUEST:
+		return "the E bit is set on a request";
+	case DIAMETER_CHECK_RETRANSMITTED_ON_ANSWER:
+		return "the T bit is set on an answer";
 	}
 	return "unknown validation error";
 }
 
 // Checks whether buffer[0..length) holds a whole 20-octet Diameter header whose
-// Length field equals length. Elements that only touch the header stop here.
+// Length field equals length and whose flags are legal for its message type.
+// Elements that only touch the header stop here.
 inline DiameterCheck diameter_check_header(const uint8_t *buffer, uint32_t length)
 {
 	if (length < DIAMETER_MESSAGE_HEADER_LENGTH)
@@ -316,6 +323,14 @@ inline DiameterCheck diameter_check_header(const uint8_t *buffer, uint32_t lengt
 			| ((uint32_t) buffer[2] << 8) | buffer[3];
 	if (declared != length)
 		return DIAMETER_CHECK_LENGTH_MISMATCH;
+	// RFC 6733 section 3: E MUST NOT be set in request messages and T MUST NOT
+	// be set in answer messages. The R bit selects the message type, and P is
+	// legal on either, so it is not tested here.
+	const uint8_t flags = buffer[4];
+	if ((flags & 0x20) && (flags & 0x80))
+		return DIAMETER_CHECK_ERROR_ON_REQUEST;
+	if ((flags & 0x10) && !(flags & 0x80))
+		return DIAMETER_CHECK_RETRANSMITTED_ON_ANSWER;
 	return DIAMETER_CHECK_OK;
 }
 

@@ -32,14 +32,15 @@ int DiameterEncap::configure(Vector<String> &conf, ErrorHandler *errh)
 	.complete() < 0)
 	return -1;
 
-	// RFC 6733 section 3 forbids E in a request. The P rule is this package's
-	// own: section 6.2 mirrors the request's P into the answer, and CAP-5 keeps
-	// it off answers instead. Reject either pair rather than discard an argument
-	// the caller wrote.
+	// RFC 6733 section 3 forbids E in a request and T in an answer, so reject
+	// either pair rather than discard an argument the caller wrote. P is legal
+	// on both: section 6.2 makes an answer mirror the request it answers, and
+	// this element has no request to consult, so the caller's declaration
+	// stands.
 	if (request && error)
 		return errh->error("the ERROR argument cannot be set on a request (RFC 6733 section 3)");
-	if (!request && proxiable)
-		return errh->error("the PROXIABLE argument cannot be set on an answer (RFC 6733 section 3)");
+	if (!request && retransmited)
+		return errh->error("the RETRANSMITED argument cannot be set on an answer (RFC 6733 section 3)");
 
 	dh.setCode(code);
 	dh.setRequest(request);
