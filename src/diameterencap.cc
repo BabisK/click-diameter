@@ -6,6 +6,7 @@
 #include <click/config.h>
 #include "diameterencap.hh"
 #include <click/args.hh>
+#include <click/error.hh>
 CLICK_DECLS
 
 DiameterEncap::DiameterEncap(){}
@@ -30,6 +31,15 @@ int DiameterEncap::configure(Vector<String> &conf, ErrorHandler *errh)
 	.read("APPID", appid)
 	.complete() < 0)
 	return -1;
+
+	// RFC 6733 section 3 forbids E in a request. The P rule is this package's
+	// own: section 6.2 mirrors the request's P into the answer, and CAP-5 keeps
+	// it off answers instead. Reject either pair rather than discard an argument
+	// the caller wrote.
+	if (request && error)
+		return errh->error("the ERROR argument cannot be set on a request (RFC 6733 section 3)");
+	if (!request && proxiable)
+		return errh->error("the PROXIABLE argument cannot be set on an answer (RFC 6733 section 3)");
 
 	dh.setCode(code);
 	dh.setRequest(request);

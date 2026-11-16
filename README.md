@@ -140,7 +140,7 @@ upper case).
 ```click
 require(diameter);
 
-InfiniteSource(DATA \<01 00 00 14 80 00 01 10 00 00 00 04 00 00 00 01
+InfiniteSource(DATA \<01 00 00 14 c0 00 01 10 00 00 00 04 00 00 00 01
                      00 00 00 02>, LIMIT 1, STOP true)
 -> DiameterFlipRequest()
 -> Print(answer, MAXLENGTH 200, CONTENTS HEX)
@@ -151,20 +151,24 @@ InfiniteSource(DATA \<01 00 00 14 80 00 01 10 00 00 00 04 00 00 00 01
 answer:   20 | 01000014 00000110 00000004 00000001 00000002
 ```
 
-The flags byte goes from `80` (R set, a request) to `00` (an answer).
+The flags byte goes from `c0` (`R` and `P` set, a proxiable request) to `00`:
+the flip clears R, and P with it, because this package keeps P off the answers
+it produces. RFC 6733 §6.2 would have an answer mirror the request's P; §3
+agrees only that E must not appear in a request and T must not appear in an
+answer.
 
 Element reference
 -----------------
 
 | Element | In/out | Arguments | What it does |
 |---|---|---|---|
-| `DiameterRatedSource` | 0/1 | `CODE`, `REQUEST` (required); `RATE` (pps, default 10), `LIMIT`, `ACTIVE`, `APPID`, `STOP` | Emits bare 20-byte messages at a token-bucket rate |
-| `DiameterEncap` | 1/1 | `CODE`, `REQUEST` (required); `ERROR`, `PROXIABLE`, `RETRANSMITED`, `APPID` | Prepends a 20-byte Diameter header to the packet |
+| `DiameterRatedSource` | 0/1 | `CODE`, `REQUEST` (required); `RATE` (pps, default 10), `LIMIT`, `ACTIVE`, `APPID`, `STOP` | Emits bare 20-byte messages at a token-bucket rate; it never sets E, P or T, so a generated request carries R alone and a generated answer none |
+| `DiameterEncap` | 1/1 | `CODE`, `REQUEST` (required); `ERROR`, `PROXIABLE`, `RETRANSMITED`, `APPID` | Prepends a 20-byte Diameter header to the packet; rejects `ERROR` on a request and `PROXIABLE` on an answer at configure time |
 | `DiameterDecap` | 1/1 | — | Strips the 20-byte header |
 | `DiameterPushAVP` | 1/1 | `CODE` (required); `VENDORSPEC`, `VENDOR`; one of `OCTETSTRING`, `UINT32`, `RANDUINT32`, `RANDALPHANUMSTRING N`, `RANDNUMSTRING N`, `RANDALPHASTRING N`, `RANDHEXSTRING N` | Appends an AVP and updates the message Length |
 | `DiameterPopAVP` | 1/1 | — | Removes the last AVP and updates the message Length |
 | `DiameterPopStorePushAVP` | 1/2 | — | Pops the last AVP from one packet (output 0) and pushes that value back onto the next (output 1) |
-| `DiameterFlipRequest` | 1/1 | — | Toggles the request bit, turning a request into an answer and back |
+| `DiameterFlipRequest` | 1/1 | — | Toggles the request bit, turning a request into an answer and back; a flip to an answer clears R and P, a flip to a request sets R and leaves P |
 | `DiameterAvpEncap` | 1/1 | `CODE` (required); `VENDORID`, `MANDATORY` | Prepends an AVP header (8 bytes, or 12 with `VENDORID`) and pads the AVP to a 4-octet boundary |
 | `DiameterAvpDecap` | 1/1 | — | Strips one AVP: consumes the AVP whole when octets follow it, otherwise forwards its value (header 8 bytes, or 12 following the V bit; padding dropped either way) |
 
@@ -178,9 +182,10 @@ CLICK=$HOME/click/bin/click bats --tap tests   # this package installed there
 
 `tests/smoke.bats` runs each config under `tests/configs/` and asserts its exact
 output. The `malformed-*` configs assert the drop path instead — exit 0, one
-warning naming the element and reason, and no `Print` line. CI runs the same
-command on every pull request plus a monthly check against upstream Click
-master.
+warning naming the element and reason, and no `Print` line. The two rejected
+`DiameterEncap` flag configs assert a configure failure: non-zero exit, the
+argument named in the error, and no `Print` line. CI runs the same command
+on every pull request plus a monthly check against upstream Click master.
 
 Malformed input is dropped, never forwarded. The six elements that read a
 received frame — `DiameterDecap`, `DiameterAvpDecap`, `DiameterFlipRequest`,
@@ -196,20 +201,32 @@ message built from the encoder's output passes the message readers and a
 sequence of AVPs stays aligned. A standalone AVP that arrives without its
 padding still decodes to its value rather than being dropped.
 
+Flag policy
+-----------
+
+RFC 6733 §3 forbids E in a request and T in an answer; P has no rule there,
+and §6.2 makes an answer copy the request's P. The construction side of this
+package enforces a stricter rule of its own: no E on a request, and no P on an
+answer. `DiameterRatedSource` never sets E, P or T, so a generated request
+carries R alone and a generated answer none. `DiameterEncap` starts from a
+header whose flags are all clear, sets only the flags the caller asks for, and
+rejects `ERROR` on a request and `PROXIABLE` on an answer at configure time
+with an error naming the argument. `DiameterFlipRequest` clears R and P
+together when it turns a request into an answer. Flipping an answer back sets R
+and leaves P as it found it, so a legal answer stays non-proxiable and an
+already-invalid one is not repaired. T is not checked on either side, so an
+answer may still carry it. Flags on a received frame are not validated: only
+its Length and AVP framing are.
+
 Known limitations
 -----------------
 
-These elements are not yet RFC-clean in every path. The defects a user hits
-first are listed here; each has a file-and-line description and a reproduction
-in `_bmad-output/specs/spec-diameter-package-hardening/findings.md`. The smoke
-tests assert today's bytes and the `malformed-*` tests assert the drop path, so
-a fix changes a test expectation rather than passing silently.
-
-- **Flag policy is not enforced (F-5, F-10).** RFC 6733 §3 forbids P on an
-  answer, yet `DiameterEncap` accepts any flag combination and
-  `DiameterFlipRequest` leaves P as it found it, so an answer can keep P. Flags
-  start clear now that every header is initialized, but nothing checks what a
-  caller then sets.
+`DiameterRatedSource`, `DiameterEncap` and `DiameterPushAVP` still seed the C
+library RNG with `srand(time(NULL))` and draw from `rand()`, so a run cannot be
+reproduced from a seed (F-11). The remaining findings — the T bit on answers,
+the absent man pages, the README recipe, the package identity and the fork
+leftovers — have a file-and-line description and a reproduction in
+`_bmad-output/specs/spec-diameter-package-hardening/findings.md`.
 
 Layout
 ------
