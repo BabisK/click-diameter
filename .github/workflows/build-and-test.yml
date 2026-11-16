@@ -64,11 +64,13 @@ jobs:
           key: click-${{ runner.os }}-v1-${{ steps.click.outputs.sha }}
 
       - name: Install build dependencies
+        id: deps
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential autoconf libpcap-dev bats
 
       - name: Build and install Click
+        id: click-build
         if: steps.click-cache.outputs.cache-hit != 'true'
         env:
           CLICK_SHA: ${{ steps.click.outputs.sha }}
@@ -92,6 +94,7 @@ jobs:
           key: click-${{ runner.os }}-v1-${{ steps.click.outputs.sha }}
 
       - name: Build and install the package
+        id: package
         run: |
           autoconf
           ./configure --with-click="$HOME/click" --prefix="$HOME/click"
@@ -99,4 +102,66 @@ jobs:
           make install
 
       - name: Run the smoke configs
+        id: tests
         run: CLICK="$HOME/click/bin/click" bats --tap tests
+
+      # A red run should say which stage failed and what it built, because an
+      # upstream Click break and a package regression look identical in a
+      # failing check otherwise, and telling them apart by hand means reading
+      # two step logs. Absent on a timeout or a manual cancel, where the job is
+      # cancelled rather than failed.
+      - name: Diagnose the failure
+        if: failure()
+        env:
+          CLICK_SHA: ${{ steps.click.outputs.sha }}
+          CLICK_CACHE_HIT: ${{ steps.click-cache.outputs.cache-hit }}
+          RESOLVE_OUTCOME: ${{ steps.click.outcome }}
+          DEPS_OUTCOME: ${{ steps.deps.outcome }}
+          CLICK_BUILD_OUTCOME: ${{ steps.click-build.outcome }}
+          PACKAGE_OUTCOME: ${{ steps.package.outcome }}
+          TESTS_OUTCOME: ${{ steps.tests.outcome }}
+        run: |
+          failed=""
+          for stage in "resolve:$RESOLVE_OUTCOME" "dependencies:$DEPS_OUTCOME" \
+            "click-build:$CLICK_BUILD_OUTCOME" "package:$PACKAGE_OUTCOME" \
+            "tests:$TESTS_OUTCOME"; do
+            name=${stage%%:*}
+            outcome=${stage#*:}
+            if [ "$outcome" = failure ]; then
+              failed="$failed $name"
+            fi
+          done
+          failed=${failed# }
+          [ -n "$failed" ] || failed="unknown (the job was cancelled or timed out)"
+
+          click_version="not installed"
+          if [ -x "$HOME/click/bin/click" ]; then
+            click_version=$("$HOME/click/bin/click" --version 2>&1 | head -1)
+          fi
+
+          cache_state="miss"
+          if [ "$CLICK_CACHE_HIT" = true ]; then
+            cache_state="hit"
+          fi
+
+          version_of() {
+            if command -v "$1" >/dev/null 2>&1; then
+              "$1" --version 2>/dev/null | head -1
+            else
+              echo "not installed"
+            fi
+          }
+
+          {
+            echo "### Build and test failed"
+            echo
+            echo "| Detail | Value |"
+            echo "| --- | --- |"
+            echo "| Failing stage | $failed |"
+            echo "| Event | \`$GITHUB_EVENT_NAME\` |"
+            echo "| Ref | \`$GITHUB_REF\` |"
+            echo "| Click commit | \`${CLICK_SHA:-not resolved}\` |"
+            echo "| Click cache | \`$cache_state\` |"
+            echo "| Click binary | \`$click_version\` |"
+            echo "| Toolchain | \`$(version_of gcc)\` / \`$(version_of autoconf)\` / \`$(version_of make)\` |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
