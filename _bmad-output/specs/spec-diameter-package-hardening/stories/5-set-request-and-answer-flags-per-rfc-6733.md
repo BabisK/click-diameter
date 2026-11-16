@@ -2,9 +2,9 @@
 title: 'Story 5: Set request and answer flags per RFC 6733'
 type: 'bugfix'
 created: '2026-11-16'
-status: 'in-review'
+status: 'done'
 review_loop_iteration: 0
-followup_review_recommended: false
+followup_review_recommended: true
 context: ['{project-root}/AGENTS.md']
 warnings: ['oversized']
 deferred:
@@ -154,7 +154,7 @@ baseline_revision: '94be58a70d7521747e431350b85215c6a9762db3'
   - `[low]` `[defer]` the answer-to-request branch can emit E, which the story's "Always" clause forbids — same defect and route as the flipped-E row.
   - `[false]` `[reject]` the tests pin English prose the intent never specifies — refuted: the story's matrix fixes the message verbatim, so pinning it is this run's contract, and every `malformed-*` test pins its warning the same way.
   - `[low]` `[patch]` the queue and the tracker disagree, so "next queued story" still resolves to story 5 — same row as the tracker patch; finalization also commits the work.
-  - `[false]` `[reject]` the change carries no run evidence and Click cannot run on this host — refuted: the suite ran twice in WSL, 52/52 on the plain prefix and 52/52 under AddressSanitizer, and `## Auto Run Result` records it.
+  - `[false]` `[reject]` the change carries no run evidence and Click cannot run on this host — refuted: the suite ran in WSL (52/52 before the patch round, 53/53 after, and 53/53 under AddressSanitizer), and `## Auto Run Result` records it.
   - `[medium]` `[patch]` the documentation narrows CAP-5 to the construction side and drops the recorded defect set — same row as the limitations patch.
 
 ## Design Notes
@@ -175,3 +175,31 @@ baseline_revision: '94be58a70d7521747e431350b85215c6a9762db3'
 
 **Manual checks (if no CLI):**
 - Run `flip-request-p.click` and read flags `00`; run `flip-answer-p.click` and read `c0`; run `encap-error-on-request.click` and confirm a non-zero exit with the named error and no `Print` line.
+
+## Auto Run Result
+
+Summary: The two flag paths RFC 6733 and CAP-5 disagree with are now enforced. `DiameterFlipRequest` clears P together with R when it turns a request into an answer, so a proxiable request (`c0`) becomes a clean answer (`00`) instead of a proxiable one (`40`); the answer-to-request branch is untouched, so it still sets R and leaves P as it found it. `DiameterEncap` now rejects `ERROR` on a request and `PROXIABLE` on an answer at configure time with an error naming the argument, rather than accepting a pair that builds a message invalid by construction. `DiameterRatedSource` needed no edit — story 2's constructor already zeroes the three flag bits — so the story pins that with a request and an answer config instead. Eight configs and their tests carry the matrix: the three flip directions, both RatedSource types, the two rejected Encap pairs, and the two legal combinations (E on an answer, T on a request) that prove the guards are pairs and not blanket bans. A ninth, `encap-proxiable-on-request`, pins the accept side of the P guard so an over-broad rejection cannot ship green.
+
+Files changed:
+- `src/diameterfliprequest.cc` — clears `proxiable` in the request-to-answer branch (F-10); the comment states the package rule and what §3 and §6.2 actually say.
+- `src/diameterencap.cc` — rejects `request && error` and `!request && proxiable` after parsing, with `errh->error` naming the argument; adds `<click/error.hh>`.
+- `tests/configs/` — `flip-request-p`, `flip-answer`, `flip-answer-p`, `rated-source-answer`, `encap-error-on-answer`, `encap-retransmit-on-request`, `encap-proxiable-on-request`, `encap-error-on-request`, `encap-proxiable-on-answer`.
+- `tests/smoke.bats` — nine tests; a new `expect_configure_failure` helper that pins Click's whole configure-failure output (path and line, element, named error, closing line) so a crash or an extra line fails the run; header notes.
+- `tests/README.md` — the nine config rows, the helper named beside `expect_drop`, and the configure-failure contract.
+- `README.md` — the flip example now starts from `c0` so it demonstrates the P clearing, a "Flag policy" section states which bits the package enforces and which it does not, the element rows state each flag contract, and a short "Known limitations" section restores the pointer to `findings.md` and the still-open F-11.
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` — story 1-5 moved to `review`.
+- `_bmad-output/specs/spec-diameter-package-hardening/stories/5-set-request-and-answer-flags-per-rfc-6733.md` — this story spec.
+
+Review findings breakdown: 30 findings — high 0, medium 7, low 18, false 5, maybe-false 0. Patched: 8 entries, 2 medium and 6 low — the false §3 attribution for the P rule in the new comments and docs; the removal of the Known limitations pointer to `findings.md` and F-11; the missing accept-side test for `PROXIABLE` on a request; the `sprint-status.yaml` state; the loose configure-failure helper; the duplicated and mis-globbed `tests/README.md` text; the README example and the two descriptions of RatedSource's flags; and two test names that called R an "answer bit". Deferred: 3 — the T bit is unchecked on both sides so an answer can carry T (pre-existing, and the intent names E and P only), the answer-to-request flip can emit a request with E (pre-existing), and the `PROXIABLE` diagnostic plus F-10 still cite §3 for a rule §3 does not contain, whose only fix is an intent-contract amendment. Rejected: 5 false — the spec is story 5's first pass so its counter and empty log were correct, the result and deferred sections belong to finalization and triage, `rated-source` already pins E=0 on a generated request, the tests pin prose the matrix fixes verbatim, and the run evidence exists; plus 2 low whose only fix edits this build's spec (the Code Map line drift and verification's missing flags).
+
+Follow-up review recommendation: true. Two medium entries were patched on a first pass. The unverified risk: the P-on-answer rule the epic mandates still deviates from RFC 6733 §6.2, which has an answer mirror the request's P, and the two `PROXIABLE` surfaces the contract pins — the diagnostic's parenthetical and F-10 — still carry the §3 attribution; a second pass should confirm the corrected prose states the deviation without overclaiming that the package is now §3-clean.
+
+Verification performed (WSL Ubuntu 26.04, GCC 15.2, against Click 2.1 built from upstream master `9197a594b`):
+- Fresh LF export of the final tree: `autoconf && ./configure --with-click=$HOME/click-master --prefix=$HOME/click-master && make && make install` — zero compiler warnings, `diameter.uo` and the elementmap installed; only the pre-existing autoconf `AC_OUTPUT` notice.
+- `g++ -fsyntax-only -I$HOME/click-master/include -W -Wall -Wextra src/*.cc` — no output, exit 0.
+- `CLICK=$HOME/click-master/bin/click bats --tap tests` — 53/53 pass, including the nine new tests and the unchanged `flip-request`, `rated-source` and `encap*` expectations.
+- AddressSanitizer: the package rebuilt and installed into the `$HOME/click-asan` prefix, the full suite under `ASAN_OPTIONS=detect_leaks=1` — 53/53 pass, exit 0, no sanitizer report.
+- Manual bytes: `flip-request-p` prints `01000014 00000118 ...` (flags `00`), `flip-answer` `80000118`, `flip-answer-p` `c0000118`, `rated-source-answer` `00000118`, `encap-error-on-answer` `20000118`, `encap-retransmit-on-request` `90000118`, `encap-proxiable-on-request` `c0000118`; both rejected configs exit 1 with `While configuring 'DiameterEncap@2 :: DiameterEncap':` and the named error.
+- Matrix audit: every matrix row has a test that ran and passed in the runs above — FLIP_REQUEST_P (test 22), FLIP_REQUEST_R (21), FLIP_ANSWER (23), FLIP_ANSWER_P (24), RATED_REQUEST (35), RATED_ANSWER (36), ENCAP_ERROR_ON_REQUEST (33), ENCAP_PROXIABLE_ON_ANSWER (34), ENCAP_ERROR_ON_ANSWER (30), ENCAP_RETRANSMIT_ON_REQUEST (31).
+
+Residual risks: `linuxmodule` and `bsdpkg` cannot be built on this host, so their compilability rests on both changes staying inside two `.cc` files and adding only a Click header. The T bit is unchecked on both paths, so an answer can still carry T; the answer-to-request flip can still emit a request with E; and the `PROXIABLE` diagnostic keeps the contract's §3 wording even though §3 does not contain that rule — all three are in `deferred`. The configure-failure test pins Click's error layout (`While configuring 'DiameterEncap@2 :: DiameterEncap':` and the closing `Router could not be initialized!`), so a Click release that rewords either line fails the two tests without any behaviour change.
