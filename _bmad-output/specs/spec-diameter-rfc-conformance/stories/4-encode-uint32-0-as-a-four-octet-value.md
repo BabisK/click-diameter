@@ -32,6 +32,10 @@ deferred:
     location: >-
       src/diameterpushavp.cc:108
     severity: low
+    closed: >-
+      Closed by tests/configs/push-avp-randuint32-zero.click: SEED 808357014
+      makes Click's first draw zero, so the four-octet zero value and AVP
+      Length 12 are pinned.
 ---
 
 <intent-contract>

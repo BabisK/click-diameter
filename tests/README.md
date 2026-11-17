@@ -65,19 +65,21 @@ live in `expect_seeded`, the seeded counterpart of `expect_drop` and
 in a copy, then again more than a second later, and requires the two packets of
 a run to differ, the two seeds to differ, and the rerun to reproduce the first
 run byte for byte. A stream seeded from the wall clock, frozen after one draw or
-ignoring the seed fails that. Six configs cover every seeded path changed by
+ignoring the seed fails that. Seven configs cover every seeded path changed by
 F-11: `randomness-encap` and `randomness-rated-source` for the identifiers,
 `randomness-rated-source-pull` for the pull path, `randomness-push-avp` for the
-generated string, `randomness-push-avp-uint32` for `RANDUINT32` and
+generated string, `randomness-push-avp-uint32` for `RANDUINT32`,
 `randomness-encap-push-avp` for the stream position a seeded writer leaves for a
-downstream `RAND*` consumer. The two writer elements no longer draw an identifier
-per message: each seeds both counters once from `click_random()` in
-`initialize()` and advances them by one per emitted message, so each field is
-unique for the first 2^32 messages of a run. The `identifiers-*` configs prove
-that at the length where a 32-bit draw repeats: `identifiers-encap-unique` sends
-240 000 messages through `DiameterEncap` from `InfiniteSource`, and
+downstream `RAND*` consumer, and `identifiers-rated-source-pull-unique` for the
+refused pulls between the frames the pull path returns. The two writer elements
+no longer draw an identifier per message: each seeds both counters once from
+`click_random()` in `initialize()` and advances them by one per emitted message,
+so each field is unique for the first 2^32 messages of a run. The `identifiers-*`
+configs prove that at the length where a 32-bit draw repeats:
+`identifiers-encap-unique` sends 240 000 messages through `DiameterEncap` from
+`InfiniteSource`, and
 `identifiers-rated-source-unique` sends the same count at `RATE 1000` through
-`DiameterRatedSource`. Both run under `click --simtime`, so four minutes of the
+`DiameterRatedSource`. All run under `click --simtime`, so four minutes of the
 story's rate takes under a second; `expect_identifier_run` requires the printed
 frame count, the distinct count of each field, a string comparison that finds no
 frame whose two identifiers are equal, and a sequence that steps by exactly one
@@ -88,7 +90,10 @@ were an artifact of comparing hex fields numerically and are 0/0 as strings. A
 counter that steps on a refused token still yields distinct values but fails the
 consecutive span. `identifiers-encap-wrap` crosses the 2^20 end-to-end carry in
 one 1 048 577-message run, so a low half that wraps without carrying fails the
-same checks. The
+same checks. `identifiers-encap-drop-then-emit` sends one payload the writer
+refuses and then one it emits through the same element, and requires the emitted
+frame to carry the seed's first pair, so a counter advanced before the drop
+fails. The
 `randomness-source` test is not a config: it greps `src/` and fails on any
 `srand`, `rand`, `srandom`, `random`, `click_srandom` or
 `click_random_srandom` call, so a reintroduced reseed fails even though no byte
@@ -141,7 +146,7 @@ What each one proves, and what it does not:
   different Command Codes, so the output shows that both threads pushed, but a
   verdict on that element's shared state needs ThreadSanitizer.
 
-None of the three can see a race in `DiameterPushAVP`'s shared value `String`:
+None of the three can see a race in the shared `String` that holds `DiameterPushAVP`'s value:
 a corrupted value is still hex, so any regex over the printed octets accepts it.
 ThreadSanitizer is what proves that part, and it is the reproducible negative
 control for all three elements: on the pre-change package it reports races
@@ -151,12 +156,12 @@ fixed package reports no racing access inside this package at all.
 `tests/tsan-check.sh CLICK CONFIG...` runs that check. CI runs it in the
 `thread-sanitizer` job against a Click and a package built with
 `-fsanitize=thread`, so no edge case here depends on someone remembering a
-manual step. The script judges reports, not the sanitizer's exit status: Click
-races its own shutdown bookkeeping and exits 66 on a clean package, so a
-non-zero status from `click` is a crash, and the gate is any race whose racing
-access (`#0` frame) is in `src/diameter.*`. It also fails if the installed
-module does not link `libtsan`, which is the trap a plain `make install` into a
-sanitizer prefix leaves.
+manual step. The script sets `TSAN_OPTIONS=exitcode=0`, so a clean package exits
+0 even though TSan reports Click's own shutdown races; a non-zero status then
+means a crash or a configuration failure, while the race verdict comes only from
+reports whose racing access (`#0` frame) is in `src/diameter.*`. It also fails if
+the installed module does not link `libtsan`, which is the trap a plain
+`make install` into a sanitizer prefix leaves.
 
 To reproduce locally, build the pair the way the job does:
 
@@ -193,10 +198,11 @@ Received messages are validated for framing and flags: RFC 6733 §3 fixes the
 Version at 1, so a message whose first octet is not 1 is dropped with
 `the Version field is not 1` before its Length is compared; an AVP has no
 Version field, so `DiameterAvpDecap` is exempt. Section 3 also makes the Message
-Length a multiple of 4, so a frame whose Length field is not is dropped with
-`the Length field is not a multiple of 4`; that test runs after the Version and
-short-header checks and before the packet-length comparison, so the Version and
-truncation reasons still outrank it and it outranks a Length mismatch. Section 3
+Length a multiple of 4, so a frame whose Length is not a multiple of 4 is
+dropped with `the Length field is not a multiple of 4`; that test runs after the
+Version and short-header checks and before the packet-length comparison, so the
+Version and truncation reasons still outrank it and it outranks a Length
+mismatch. Section 3
 also forbids E in a request and T in an answer, so a frame with either is
 dropped with `the E bit is set on a request` or `the T bit is set on an answer`.
 P is legal on either message type, so it never causes a drop. The same walk
@@ -204,14 +210,23 @@ rejects a vendor AVP whose `V` bit is set with a zero Vendor-Id, per RFC 6733
 §4.1.1, and drops it with `the V bit is set with a zero Vendor-Id`; every AVP
 walker inherits that check, and the Length checks keep precedence over it.
 
-Messages are padded to the same boundary: `DiameterEncap` zero-pads the payload
-up to a 4-octet boundary and counts the pad in the Message Length, because §3
-defines the Length as covering the padded AVPs. The pad is part of the message,
-so `DiameterDecap` forwards it with the payload; a payload already on the
-boundary gains no octet. The `encap-padding*` configs pin the three residues,
-`encap-padding-push-avp` pins that the pad does not make a non-AVP body walkable,
-and `encap`, `encap-empty`, `encap-decap`, `encap-push-pop` and `smp-encap`
-keep their existing bytes.
+The whole message is validated, not only its header: `DiameterDecap` and
+`DiameterFlipRequest` walk the body too, so a message carrying a malformed AVP
+or a forbidden `V=1, Vendor-Id=0` AVP is dropped by the reader instead of being
+forwarded or re-emitted with the defect intact. The body of every decapped
+message must therefore be a sequence of AVPs; `decap.click`,
+`decap-p-on-answer.click`, `decap-t-on-request.click` and `encap-decap.click` use
+one 8-octet AVP for it.
+
+A message is the header plus a sequence of padded AVPs, so its Length is a
+multiple of 4; `DiameterEncap` requires a body already on that boundary.
+`encap-unaligned-payload.click` pins the refusal: a 5-octet payload is dropped
+with `the payload length is not a multiple of 4, so it cannot be a sequence of
+padded AVPs` rather than zero-padded into a frame that only looks like a
+message. `encap-body-not-avps.click` pins the remaining limit: a 4-octet body is
+aligned, so the writer forwards it, but `DiameterPushAVP` drops it because it is
+not an AVP. `encap`, `encap-empty`, `encap-decap`, `encap-push-pop` and
+`smp-encap` keep their existing bytes.
 
 A configuration the package refuses is asserted with `expect_configure_failure`,
 which takes the config, the refusing element and the named message; it requires a
@@ -219,7 +234,7 @@ non-zero exit, Click's whole configure-failure output for that config (path and
 line, the `While configuring 'ELEMENT@N :: ELEMENT':` line, the named error, and
 `Router could not be initialized!`), and no `Print` line. The element is a
 parameter because more than one element refuses a configuration, and the `@N`
-suffix is matched with a wildcard rather than pinned. Nineteen configs take that
+suffix is matched with a wildcard rather than pinned. Twenty-one configs take that
 path: `encap-error-on-request.click`, `encap-retransmit-on-answer.click`,
 `encap-code-too-large.click`, `encap-code-first-too-large.click`,
 `rated-source-code-too-large.click`,
@@ -232,6 +247,7 @@ path: `encap-error-on-request.click`, `encap-retransmit-on-answer.click`,
 `push-avp-conflict-randalphanumstring-randalphastring.click`,
 `push-avp-conflict-three.click`, `encap-duplicate-code.click`,
 `rated-source-duplicate-rate.click`, `push-avp-duplicate-octetstring.click`,
+`push-avp-duplicate-wrapped.click`, `avp-encap-duplicate-code.click`,
 `push-avp-randhex-too-large.click` and
 `push-avp-randhex-too-large-vendor.click`. The four CODE-range configs refuse a
 `CODE` above `0xFFFFFF` in the two writers -- both the `0x01000118` repro value
@@ -240,9 +256,11 @@ Command Code at three octets, so `0x01000118` would silently go out as
 `0x000118`. The six conflict configs refuse more than one
 value source in one `DiameterPushAVP`, which accepts at most one, and the
 three-source one also pins that the error names the first conflicting pair in
-documented argument order. The three duplicate-keyword configs refuse a keyword
+documented argument order. The five duplicate-keyword configs refuse a keyword
 given twice, naming it, in `DiameterEncap`'s keyword-only shape,
-`DiameterRatedSource`'s positional-plus-keyword shape, and `DiameterPushAVP`.
+`DiameterRatedSource`'s positional-plus-keyword shape, `DiameterPushAVP`,
+`DiameterAvpEncap`, and `DiameterPushAVP` with the keyword and its value split
+across a line, which Click still parses as one argument.
 The two generator-cap configs refuse a `RANDHEXSTRING` count one past the
 16,777,184-octet body limit (16,777,180 with the vendor header), so the value
 is never materialised.
@@ -255,8 +273,9 @@ drop line its own row names.
 CI runs the same command on every pull request and every push to `master`, plus
 monthly against the latest Click master, so a local pass over the same Click is
 the same check. CI's Click is built with `--enable-user-multithread`, so the
-three `smp-*` tests run there rather than skipping; only the ThreadSanitizer
-check stays a local run.
+three `smp-*` tests run there rather than skipping; the `thread-sanitizer` job
+runs the same script against a sanitizer build, so a local run only reproduces a
+failure.
 
 ## configs/
 
@@ -288,6 +307,8 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `push-avp-randuint32-zero.click` | `RandomSeed(SEED 808357014)` makes Click's first draw zero: `RANDUINT32` is four zero octets at AVP Length 12 |
 | `push-avp-rand-zero.click` | `RANDNUMSTRING 0` is unused, not a second source: `RANDHEXSTRING 4` supplies four hex characters at AVP Length 12 (A-10) |
 | `push-avp-duplicate-octetstring.click` | a repeated `OCTETSTRING` fails configuration naming the argument instead of keeping the last value (DW-2) |
+| `push-avp-duplicate-wrapped.click` | a repeated `MANDATORY` with its value split across a line still fails configuration: Click treats the newline as whitespace (DW-2) |
+| `avp-encap-duplicate-code.click` | the fourth configurable element refuses a repeated `CODE` naming the argument (DW-2) |
 | `encap-duplicate-code.click` | a repeated `CODE` fails configuration naming the argument (DW-2) |
 | `rated-source-duplicate-rate.click` | a repeated `RATE` after the positional shape fails configuration naming the argument (DW-2) |
 | `push-avp-randhex-too-large.click` | `RANDHEXSTRING 16777185` is past the 16,777,184-octet body limit and fails configuration (DW-6) |
@@ -310,6 +331,8 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `avp-padding-one.click` | a 3-octet value pads to 12 octets with one zero octet |
 | `avp-padding-none.click` | a 4-octet value needs no padding: 12 octets |
 | `avp-encap-length-overflow.click` | a 16,777,210-octet value would wrap the three-octet AVP Length, so the envelope is dropped with its own warning (DW-5) |
+| `avp-encap-length-max.click` | 16,777,207 value octets plus the 8-octet header is exactly `0xFFFFFF`: the largest legal AVP Length still emits, so the guard is `>` not `>=` (DW-5) |
+| `avp-encap-length-max-vendor.click` | the same inclusive ceiling with the 12-octet vendor header: 16,777,203 value octets, flags `80`, Length `ffffff`, Vendor-Id 42 (DW-5) |
 | `avp-padding-empty.click` | an empty value is an 8-octet AVP with no padding |
 | `avp-padding-vendor.click` | the 12-octet vendor header plus a 5-octet value pads to 20 octets |
 | `avp-two-decode.click` | two consecutive padded AVPs decode at the right offsets |
@@ -325,15 +348,13 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `flip-answer-p.click` | an answer with P set flips to `c0`: R set, P kept |
 | `flip-answer-e.click` | an error answer flips to `80`: R set, E cleared (RFC 6733 §3) |
 | `flip-answer-ep.click` | flags `60` flip to `c0`: P kept, E cleared |
-| `decap.click` | stripping the 20-byte header leaves the payload |
+| `decap.click` | stripping the 20-byte header leaves the 8-octet AVP body; the message is validated as a whole |
 | `encap.click` | a 4-octet payload gets a version 1 header whose Length counts the header plus the payload, 24 octets (F-4) |
 | `encap-empty.click` | a zero-octet packet gets a 20-octet header, version 1 and Length 20 (F-4) |
-| `encap-decap.click` | Encap then Decap forwards the payload instead of dropping it (F-4) |
-| `encap-padding.click` | a 5-octet payload gains three zero pad octets: 28 octets, Length `0x1c`, and Decap forwards the 8 padded octets without a drop (A-4, RFC 6733 §3) |
-| `encap-padding-two.click` | a 6-octet payload gains two zero pad octets: 28 octets, Length `0x1c` (A-4, RFC 6733 §3) |
-| `encap-padding-one.click` | a 7-octet payload gains one zero pad octet: 28 octets, Length `0x1c` (A-4, RFC 6733 §3) |
-| `encap-padding-push-avp.click` | the padded body is not an AVP sequence: `DiameterPushAVP` drops it with `AVP length below its header`, so padding fixes the header rule only (V-8) |
-| `encap-length-overflow.click` | a 16,777,200-octet payload padded into a message past `0xFFFFFF` is dropped with its own warning instead of wrapping the Length (DW-4) |
+| `encap-decap.click` | Encap then Decap forwards a valid 8-octet AVP body instead of dropping it (F-4) |
+| `encap-unaligned-payload.click` | a 5-octet payload cannot be a sequence of padded AVPs, so the writer drops it with its own warning instead of zero-padding it (CAP-2/A-4, RFC 6733 §3) |
+| `encap-body-not-avps.click` | a 4-octet body is aligned but is not an AVP, so `DiameterPushAVP` drops it: alignment is not validity (V-8) |
+| `encap-length-overflow.click` | a 16,777,200-octet payload whose message Length would pass `0xFFFFFF` is dropped with its own warning instead of wrapping the Length (DW-4) |
 | `encap-push-pop.click` | Encap then PushAVP grows a 28-octet frame to 44 and PopAVP restores 28 (F-4) |
 | `encap-error-on-answer.click` | E on an answer is legal and unchecked: flags `20` |
 | `encap-retransmit-on-request.click` | T on a request is not checked: flags `90` |
@@ -353,14 +374,17 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `randomness-rated-source.click` | `RandomSeed(SEED 12345)` with `DiameterRatedSource`: two 20-octet frames, reproduced across runs, identifiers differ (F-11) |
 | `randomness-push-avp.click` | `RandomSeed(SEED 12345)` with `DiameterPushAVP(RANDHEXSTRING 8)`: two 36-octet frames, reproduced across runs, values differ (F-11) |
 | `randomness-push-avp-uint32.click` | `RandomSeed(SEED 12345)` with `DiameterPushAVP(RANDUINT32 true)`: two 32-octet frames, reproduced across runs, values differ (F-11) |
-| `randomness-rated-source-pull.click` | `RandomSeed(SEED 12345)` with `Unqueue` forcing `DiameterRatedSource`'s pull path: two 20-octet frames, reproduced across runs, identifiers differ (F-11) |
+| `randomness-rated-source-pull.click` | `RandomSeed(SEED 12345)` with `Unqueue` forcing `DiameterRatedSource`'s pull path: two 20-octet frames, reproduced across runs, identifiers differ, and the literal first frame is pinned (F-11) |
+| `identifiers-rated-source-pull-unique.click` | the pull path at `RATE 10` under `--simtime`: refused pulls between the three returned packets consume no identifier, so the fields stay consecutive |
 | `identifiers-encap-unique.click` | `RandomSeed(SEED 12345)` with 240 000 messages through `DiameterEncap` under `--simtime`: every hop-by-hop and end-to-end value distinct and consecutive, no frame with two equal identifiers, reproduced across runs |
 | `identifiers-rated-source-unique.click` | the same counts at `RATE 1000` through `DiameterRatedSource` under `--simtime`, so a counter that steps on a refused token leaves a gap in the sequence |
 | `identifiers-encap-wrap.click` | 1 048 577 messages through `DiameterEncap` under `--simtime`: crosses the 2^20 end-to-end carry once, and the fields stay distinct and consecutive |
+| `identifiers-encap-drop-then-emit.click` | one payload the writer refuses and then one it emits through the same element: the emitted frame carries the seed's first pair, so a drop consumes no identifier |
 | `randomness-encap-push-avp.click` | `RandomSeed(SEED 12345)` with `DiameterEncap` chained into `DiameterPushAVP(RANDHEXSTRING 8)`: pins the stream position a seeded writer leaves for a downstream generator |
 | `popstorepush-roundtrip.click` | popping an unpadded AVP and pushing it back restores the 44-octet message (F-1) |
 | `popstorepush-mandatory.click` | an AVP with flags `40` survives the element's decode and re-encode: the second output carries it again with M set (DW-1) |
-| `popstorepush-length-overflow.click` | a maximal message plus the stored maximal AVP would reach 33,554,404 octets, so the packet is dropped and the AVP kept (DW-4) |
+| `popstorepush-length-overflow.click` | a maximal message plus the stored maximal AVP would reach 33,554,404 octets, so the packet is dropped (DW-4) |
+| `popstorepush-store-retained.click` | the overflow drop keeps the stored AVP: a later 20-octet message carries it on output 1, so a drop that clears the store fails the run (DW-4) |
 | `no-avp.click` | a header-only message forwarded unchanged by both pop elements |
 | `malformed-version-decap.click` | a 20-octet Version 2 request dropped by `DiameterDecap`, no payload forwarded (A-5, RFC 6733 §3) |
 | `malformed-version-pushavp.click` | the same frame dropped by `DiameterPushAVP` rather than appended to (A-5) |
@@ -385,7 +409,7 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `malformed-length-short.click` | a header Length below the packet length dropped by `DiameterPushAVP` |
 | `malformed-popstorepush-avp-length.click` | a zero-length AVP dropped by `DiameterPopStorePushAVP` |
 | `malformed-popstorepush-armed.click` | a malformed second pass dropped by `DiameterPopStorePushAVP` with an AVP armed |
-| `malformed-avp-padding-overhang.click` | a 30-octet frame with an unaligned Length dropped by `DiameterPopAVP` for the header rule, before the padded AVP bound it was built for (A-4) |
+| `malformed-avp-padding-overhang.click` | a 30-octet frame with an unaligned Length dropped by `DiameterPopAVP` for the header rule, ahead of the padded-AVP bound check the frame was built to reach (A-4) |
 | `malformed-avp-trailing-octets.click` | a 32-octet aligned frame with four trailing octets: the partial second AVP header is still dropped by `DiameterPopAVP` (A-4) |
 | `malformed-decap-length.click` | an aligned Length mismatch dropped by `DiameterDecap` |
 | `malformed-length-not-aligned.click` | a 25-octet frame whose Length says 25 dropped by `DiameterDecap` with `the Length field is not a multiple of 4` (A-4, RFC 6733 §3) |
@@ -408,10 +432,10 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 Expectations record today's bytes. AVPs are padded to a 4-octet boundary with
 zero octets and the AVP Length excludes that padding (RFC 6733 §4.1); the
 `avp-padding*`, `avp-two-decode`, `avp-decap-*` and `avp-roundtrip` configs pin
-that, so a regression to an unpadded AVP fails the run. A message is padded the
-same way: the Message Length includes the zero pad and is therefore a multiple
-of 4 (RFC 6733 §3), which the `encap-padding*` configs pin and the header
-validators enforce. The drop tests are the
+that, so a regression to an unpadded AVP fails the run. A message's Length is a
+multiple of 4 because it covers the header and the padded AVPs (RFC 6733 §3),
+which `encap-unaligned-payload` pins on the writer side and the header
+validators enforce on the reader side. The drop tests are the
 exception: they assert no forwarded bytes at all, only the one warning line, so
 a silent drop or a forwarded malformed packet fails. A frame that carries both a
 bad Version and a bad Length, or a bad Version and a truncated header, reports

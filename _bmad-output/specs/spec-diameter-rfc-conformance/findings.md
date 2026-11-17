@@ -39,7 +39,7 @@ Severity is impact if the defect reaches a user, not effort to fix. Capability l
 - **Symptom:** two halves of the same rule. A 25-octet frame whose Length field says 25 passes `DiameterDecap` and `DiameterFlipRequest`, which only compare `declared == length`. And `DiameterEncap` writes `Length = 20 + payload length` with neither padding nor a check, so a 5-octet payload produces exactly such a frame. The package therefore emits frames its own message readers reject (`DiameterPushAVP` fails on the trailing 5 octets as a short AVP header) while its header readers accept them.
 - **Cause:** no `% 4` test exists on either side.
 - **RFC:** 6733 §3 — "The Message Length field is three octets and indicates the length of the Diameter message including the header fields and the padded AVPs. Thus, the Message Length field is always a multiple of 4."
-- **Fix:** add `DIAMETER_CHECK_LENGTH_NOT_ALIGNED` to `diameter_check_header`, and have `DiameterEncap` either zero-pad the payload to a 4-octet boundary or reject a non-multiple-of-4 payload at run time. Padding is the RFC-consistent choice (§4: "A number of zero-valued bytes are added to the end of the AVP Data field"); rejecting is the safer one for a lab element. Pick one and pin it in a config.
+- **Fix:** add `DIAMETER_CHECK_LENGTH_NOT_ALIGNED` to `diameter_check_header`, and have `DiameterEncap` reject a payload that is not a multiple of 4 at run time rather than zero-pad it. A payload that is not on the boundary cannot be a sequence of padded AVPs, and padding it repairs malformed input into a frame that only looks like a message (SPEC constraint). The rejection is pinned by `tests/configs/encap-unaligned-payload.click`.
 - **Capability:** CAP-2, CAP-3
 
 ## A-5 — The Version field is never validated (medium)
@@ -66,7 +66,7 @@ Severity is impact if the defect reaches a user, not effort to fix. Capability l
 - **Symptom:** both elements draw `hbh` and `e2e` fresh from `click_random()` on every packet. At 1 000 messages per second a four-minute window holds about 240 000 messages; with 32 random bits the collision probability is roughly `n²/2³³`, which is far above one, so a duplicate is effectively certain rather than unlikely. The two fields are also drawn from the same stream and can come out equal.
 - **Cause:** random-per-packet is the only generator, and there is no counter, no time component and no way for a caller to supply either identifier.
 - **RFC:** 6733 §3 — "Senders of request messages MUST insert a unique identifier on each message. The identifier MUST remain locally unique for a period of at least 4 minutes, even across reboots." The same section prescribes the shape of the fix: the high-order 12 bits of `e2e` may carry the low-order 12 bits of the current time and the low 20 a random value; `hbh` is "normally a monotonically increasing number, whose start value was randomly generated".
-- **Fix:** a per-element counter seeded once from `click_random()`, with the time component on `e2e`. This keeps CAP-6 of the hardening spec intact — the seed still comes from Click, so `RandomSeed` still reproduces a run — while making uniqueness a property of the generator instead of a probability.
+- **Fix:** a per-element counter seeded once from `click_random()`, presented with the RFC's twelve/twenty shape but carrying no time component, and a fixed `RandomSeed` reproduces it. This keeps CAP-6 of the hardening spec intact — the seed still comes from Click, so `RandomSeed` still reproduces a run — while making uniqueness a property of the generator instead of a probability. The RFC's optional reboot-time value is not used and no across-reboot claim is made (SPEC constraint).
 - **Capability:** CAP-4
 
 ## A-8 — Per-packet writes to shared element members race under SMP (medium)
@@ -102,7 +102,7 @@ Against well-formed input the package is sound, and every item below is pinned b
 
 - Flags follow §3 and §6.2: E is rejected on a request, T on an answer; P is mirrored in both flip directions; E is cleared when an answer becomes a request and T when a request becomes an answer.
 - AVP padding is written as zero octets, excluded from the AVP Length, and derived from Length alone on decode.
-- `diameter_check_message` walks every AVP with a padded bound, so a zero-length AVP, an AVP below its header and an AVP past the message end are all dropped rather than looped over or read out of bounds.
+- `diameter_check_message` walks every AVP with a padded bound, so a zero-length AVP, an AVP below its header and an AVP past the message end are all dropped rather than looped over or read out of bounds. The alignment rule makes the padded-bound comparison unreachable through the message check; it stays as defence in depth for a caller that walks a buffer without the header check.
 - Every reader that touches a message checks Length and flags first; a malformed frame is killed, never forwarded as an empty or partial packet, and each drop logs one line naming the element and the reason.
 - `DiameterHeader` and `AvpHeader` both initialize every field, so no writer can emit an indeterminate header byte (F-4 of the hardening spec).
 - A message with no AVPs is a no-op for `DiameterPopAVP` and `DiameterPopStorePushAVP` rather than an error.

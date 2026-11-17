@@ -170,14 +170,22 @@ int DiameterPushAVP::configure(Vector<String> &conf, ErrorHandler *errh)
 	const uint32_t maxGenerated =
 			((DIAMETER_MAX_24BIT_VALUE - DIAMETER_MESSAGE_HEADER_LENGTH) & ~3u)
 			- (vendorSpec ? 12 : 8);
-	if (randAlphaNumString > maxGenerated)
-		return errh->error("the RANDALPHANUMSTRING argument must not exceed %u: a larger value cannot fit the three-octet message Length (RFC 6733 section 3)", (unsigned) maxGenerated);
-	if (randNumString > maxGenerated)
-		return errh->error("the RANDNUMSTRING argument must not exceed %u: a larger value cannot fit the three-octet message Length (RFC 6733 section 3)", (unsigned) maxGenerated);
-	if (randAlphaString > maxGenerated)
-		return errh->error("the RANDALPHASTRING argument must not exceed %u: a larger value cannot fit the three-octet message Length (RFC 6733 section 3)", (unsigned) maxGenerated);
-	if (randHexString > maxGenerated)
-		return errh->error("the RANDHEXSTRING argument must not exceed %u: a larger value cannot fit the three-octet message Length (RFC 6733 section 3)", (unsigned) maxGenerated);
+	// One table and one branch: the four generators enforce the same ceiling and
+	// differ only in the name the error reports, so a new generator adds a row
+	// here and cannot leave a sibling unchecked.
+	const struct {
+		const char *name;
+		size_t count;
+	} generators[] = {
+		{ "RANDALPHANUMSTRING", randAlphaNumString },
+		{ "RANDNUMSTRING", randNumString },
+		{ "RANDALPHASTRING", randAlphaString },
+		{ "RANDHEXSTRING", randHexString }
+	};
+	for (size_t i = 0; i < sizeof(generators) / sizeof(generators[0]); ++i)
+		if (generators[i].count > maxGenerated)
+			return errh->error("the %s argument must not exceed %u: a larger value cannot fit the three-octet message Length (RFC 6733 section 3)",
+					generators[i].name, (unsigned) maxGenerated);
 
 	ah.setCode(code);
 	ah.setMandatory(mandatory);

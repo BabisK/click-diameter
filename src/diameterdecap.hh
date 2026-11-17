@@ -20,9 +20,11 @@ strips the Diameter header from each packet
 
 =d
 
-Checks the 20-octet Diameter header at the front of the packet and, when it is
-well formed, removes it and forwards the rest of the packet unchanged. The
-payload is not inspected: this element reads a header, not a message body.
+Checks the whole Diameter message at the front of the packet and, when it is
+well formed, removes the 20-octet header and forwards the rest of the packet
+unchanged. The body is part of the message, so it is walked: the message must be
+a sequence of AVPs that each pass the package's AVP checks. (DiameterAvpDecap
+reads one AVP on its own; this element reads a message.)
 
 A packet is dropped rather than forwarded when any of these holds, and the
 element prints one C<DiameterDecap: dropping malformed packet: REASON> line
@@ -52,7 +54,12 @@ the E bit is set on a request;
 
 =item *
 
-the T bit is set on an answer.
+the T bit is set on an answer;
+
+=item *
+
+an AVP in the body is malformed, runs past the message end, or carries the V
+bit with a zero Vendor-Id.
 
 =back
 

@@ -199,13 +199,13 @@ expect_element_page() {
 			return 1
 		}
 	done
-	# A-4: the Encap page is where a caller learns that the writer pads the
-	# payload and counts the pad in the Length.
+	# A-4/CAP-2: the Encap page is where a caller learns that a payload which
+	# cannot be a sequence of padded AVPs is dropped rather than padded.
 	text=$(page DiameterEncap) || return 1
 	description=$(section DESCRIPTION <<<"$text")
 	flat=${description//$'\n'/ }
-	grep -qF 'zero-padded up to a 4-octet boundary' <<<"$flat" || {
-		echo "DiameterEncap: DESCRIPTION does not state the payload padding"
+	grep -qF 'cannot be a sequence of padded AVPs' <<<"$flat" || {
+		echo "DiameterEncap: DESCRIPTION does not state the unaligned-payload refusal"
 		return 1
 	}
 	# The page keeps the header's line breaks, so flatten the description
@@ -221,7 +221,7 @@ expect_element_page() {
 
 @test "manpages: the three-octet ceilings and the repeated-keyword rule are documented" {
 	local element text description flat
-	for element in DiameterEncap DiameterPushAVP DiameterPopStorePushAVP DiameterAvpEncap; do
+	for element in DiameterEncap DiameterRatedSource DiameterPushAVP DiameterPopStorePushAVP DiameterAvpEncap; do
 		text=$(page "$element") || return 1
 		description=$(section DESCRIPTION <<<"$text")
 		# The page keeps the header's line breaks, so flatten before matching.
@@ -230,15 +230,6 @@ expect_element_page() {
 		DiameterEncap)
 			grep -qF 'message Length would exceed the three-octet field' <<<"$flat" || {
 				echo "DiameterEncap: DESCRIPTION does not name the message Length ceiling"
-				return 1
-			} ;;
-		DiameterPushAVP)
-			grep -qF 'given more than once' <<<"$flat" || {
-				echo "DiameterPushAVP: DESCRIPTION does not name the repeated-keyword rule"
-				return 1
-			}
-			grep -qF '16,777,184' <<<"$flat" || {
-				echo "DiameterPushAVP: DESCRIPTION does not state the generator cap"
 				return 1
 			} ;;
 		DiameterPopStorePushAVP)
@@ -252,6 +243,22 @@ expect_element_page() {
 				return 1
 			} ;;
 		esac
+		# DW-2: the repeated-keyword rule is package-wide, so each of the four
+		# configurable elements states it on its own page. The two pop elements
+		# take no arguments, so the rule does not apply to them.
+		case $element in
+		DiameterEncap|DiameterRatedSource|DiameterPushAVP|DiameterAvpEncap)
+			grep -qF 'given more than once' <<<"$flat" || {
+				echo "$element: DESCRIPTION does not name the repeated-keyword rule"
+				return 1
+			} ;;
+		esac
+		if [ "$element" = DiameterPushAVP ]; then
+			grep -qF '16,777,184' <<<"$flat" || {
+				echo "DiameterPushAVP: DESCRIPTION does not state the generator cap"
+				return 1
+			}
+		fi
 	done
 }
 

@@ -24,6 +24,10 @@ deferred:
     location: >-
       src/diameter.hh:239
     severity: low
+    closed: >-
+      Closed by tests/configs/popstorepush-mandatory.click in the deferred-work
+      story of spec-diameter-conformance-verification: the hand-written frame
+      carries flags 40 and the re-encoded output is pinned byte for byte.
   - summary: >-
       A repeated keyword argument silently keeps the last value, so
       `MANDATORY true, MANDATORY false` configures and emits M=0.
@@ -36,6 +40,10 @@ deferred:
     location: >-
       src/diameterpushavp.cc:87
     severity: low
+    closed: >-
+      Closed by the shared diameter_reject_duplicate_keywords() check in
+      src/diameterconf.hh, which now runs in all four configurable elements, and
+      by the duplicate-keyword configs including the wrapped-line case.
 ---
 
 <intent-contract>

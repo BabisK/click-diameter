@@ -72,7 +72,11 @@ Packet* DiameterPopStorePushAVP::process(Packet * p_in)
 		memcpy(data, lastAvp + headerLength, ah.getLength() - headerLength);
 		dh.setLength(messageLength - ah.getLengthPadded());
 		p_in->take(ah.getLengthPadded());
+		// The packet may be freed when the copy cannot be allocated; the AVP
+		// just popped stays in the store for the next packet.
 		wp = p_in->put(0);
+		if (!wp)
+			return 0;
 		dh.encode(wp->data());
 	}
 	else
@@ -87,6 +91,8 @@ Packet* DiameterPopStorePushAVP::process(Packet * p_in)
 			return 0;
 		}
 		wp = p_in->put(ah.getLengthPadded());
+		if (!wp)
+			return 0;
 		memset(wp->data() + messageLength, 0, ah.getLengthPadded());
 		ah.encode(wp->data() + messageLength);
 		uint32_t headerLength = ah.getHeaderLength();

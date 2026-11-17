@@ -13,8 +13,11 @@ DiameterFlipRequest::DiameterFlipRequest(){}
 
 Packet* DiameterFlipRequest::simple_action(Packet * p_in)
 {
-	const DiameterCheck check = diameter_check_header(p_in->data(),
-			p_in->length());
+	// Validate the whole message before rewriting it: a header that passes but
+	// carries a malformed or forbidden AVP would otherwise leave this element
+	// re-emitting a frame that is still malformed.
+	const DiameterCheck check = diameter_check_message(p_in->data(),
+			p_in->length(), 0);
 	if (check != DIAMETER_CHECK_OK)
 	{
 		click_chatter("%s: dropping malformed packet: %s", class_name(),
@@ -24,6 +27,8 @@ Packet* DiameterFlipRequest::simple_action(Packet * p_in)
 	}
 
 	WritablePacket * wp = p_in->put(0);
+	if (!wp)
+		return 0;
 	DiameterHeader dh;
 	dh.decode(wp->data());
 	if (dh.isRequest())

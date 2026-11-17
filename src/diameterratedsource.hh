@@ -30,10 +30,10 @@ end-to-end identifiers. Each identifier is seeded once from click_random() when
 the element is initialized and then advanced by one for every message the
 element emits, whether the packet leaves through the push task or through pull,
 so each field is unique for the first 2^32 messages of a run and RandomSeed
-reproduces the sequence byte for byte. The end-to-end field is a 32-bit counter
-presented with a twelve/twenty split: its high-order 12 bits advance when the
-low-order 20 bits wrap. RFC 6733 section 3 only permits a reboot-time value in
-the high half and a random value in the low half; this element reads neither,
+reproduces the sequence byte for byte. The end-to-end field is a plain 32-bit
+counter; its high-order 12 bits advance when the low-order 20 bits wrap. RFC
+6733 section 3 permits, but does not require, a reboot-time value in the high
+half and a random value in the low half on a new run; this element uses neither,
 and the seed chooses both starting values. A new run starts a new sequence from
 its seed; nothing is claimed across reboots. The E, P and T bits are always
 clear, so a generated request carries R alone and a generated answer carries no
@@ -48,7 +48,9 @@ element returns a null packet instead.
 The Command Code field is three octets (RFC 6733 section 3), so CODE must not
 exceed 0xFFFFFF: a larger value fails configuration with an error naming the
 argument rather than being truncated on the wire. The two experimental values
-section 3.1 reserves, 0xFFFFFE and 0xFFFFFF, are in range.
+that section 3.1 reserves, 0xFFFFFE and 0xFFFFFF, are in range. A keyword
+repeated in one configuration fails configuration too, with C<the RATE argument
+is given more than once>, rather than silently keeping the last value.
 
 Keyword arguments are:
 

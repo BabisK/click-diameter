@@ -31,13 +31,14 @@ changes: the Length, the identifiers and every AVP stay as they were.
 Re-encoding writes only the modelled flags, so the reserved flag bits of an
 accepted nonconforming frame come back zero.
 
-The header is validated before the flip, so a malformed packet is dropped
+The whole message is validated before the flip, so a malformed packet is dropped
 rather than repaired: the element prints one
 C<DiameterFlipRequest: dropping malformed packet: REASON> line when the Version
 field is not 1, when the packet is shorter than the 20-octet header, when its
 Length field is not a multiple of 4, when its Length field does not equal the
-packet length, when the E bit is set on a request, or when the T bit is set on
-an answer. P on either type and T on a request are not errors. The element
+packet length, when the E bit is set on a request, when the T bit is set on an
+answer, or when an AVP in the body is malformed or carries the V bit with a zero
+Vendor-Id. P on either type and T on a request are not errors. The element
 takes no arguments.
 
 =a

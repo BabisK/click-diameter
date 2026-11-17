@@ -145,7 +145,7 @@ generator that emits exactly N characters from a fixed alphabet:
 `RANDALPHASTRING N` (`A`-`Z`, `a`-`z`) and `RANDHEXSTRING N` (`0`-`9`, `A`-`F`,
 upper case). At most one value source -- `OCTETSTRING` or one of these --
 supplies the value: supplying two of them fails configuration with an error
-naming both, while supplying none appends the header-only AVP. A zero generator
+naming the pair, while supplying none appends the header-only AVP. A zero generator
 count and `RANDUINT32 false` are not sources, so either may sit beside the one
 real source. A generator count above 16,777,184 (16,777,180 with the vendor
 header) cannot fit the three-octet message Length, so it fails configuration. A
@@ -180,13 +180,13 @@ Element reference
 | Element | In/out | Arguments | What it does |
 |---|---|---|---|
 | `DiameterRatedSource` | 0/1 | `CODE`, `REQUEST` (required); `RATE` (pps, default 10), `LIMIT`, `ACTIVE`, `APPID`, `STOP` | Emits bare 20-byte messages at a token-bucket rate; hop-by-hop and end-to-end identifiers are seeded once from `click_random()` and counter-advanced per emitted message, so each is unique for the first 2^32 messages of a run; it never sets E, P or T, so a generated request carries R alone and a generated answer none; rejects a `CODE` above `0xFFFFFF` at configure time |
-| `DiameterEncap` | 1/1 | `CODE`, `REQUEST` (required); `ERROR`, `PROXIABLE`, `RETRANSMITED`, `APPID` | Prepends a 20-byte Diameter header to the packet and zero-pads the payload to a 4-octet boundary, counting the pad in the Length; hop-by-hop and end-to-end identifiers are seeded once from `click_random()` and counter-advanced per emitted message, so each is unique for the first 2^32 messages of a run; accepts `PROXIABLE` on either type, rejects `ERROR` on a request and `RETRANSMITED` on an answer, rejects a `CODE` above `0xFFFFFF`, and drops a payload whose message Length would exceed `0xFFFFFF` at run time |
-| `DiameterDecap` | 1/1 | — | Strips the 20-byte header; validates the message first |
+| `DiameterEncap` | 1/1 | `CODE`, `REQUEST` (required); `ERROR`, `PROXIABLE`, `RETRANSMITED`, `APPID` | Prepends a 20-byte Diameter header to the packet; the payload must already be a sequence of padded AVPs (a multiple of 4), and a payload that is not is dropped instead of padded, because padding cannot make it one; hop-by-hop and end-to-end identifiers are seeded once from `click_random()` and counter-advanced per emitted message, so each is unique for the first 2^32 messages of a run; accepts `PROXIABLE` on either type, rejects `ERROR` on a request and `RETRANSMITED` on an answer, rejects a `CODE` above `0xFFFFFF`, and drops a payload whose message Length would exceed `0xFFFFFF` at run time |
+| `DiameterDecap` | 1/1 | — | Strips the 20-byte header; validates the whole message first, body included |
 | `DiameterPushAVP` | 1/1 | `CODE` (required); `VENDORSPEC`, `VENDOR`, `MANDATORY`; one of `OCTETSTRING`, `UINT32`, `RANDUINT32`, `RANDALPHANUMSTRING N`, `RANDNUMSTRING N`, `RANDALPHASTRING N`, `RANDHEXSTRING N` | Appends an AVP and updates the message Length; `MANDATORY` sets the AVP's M bit; two value sources or a repeated keyword are refused at configure time; validates the message first and drops a packet whose appended AVP would push the message Length past `0xFFFFFF`, with its own warning |
 | `DiameterPopAVP` | 1/1 | — | Removes the last AVP and updates the message Length; validates the message first |
 | `DiameterPopStorePushAVP` | 1/2 | — | Pops the last AVP from one packet (output 0) and pushes that value back onto the next (output 1); validates the message first and drops a push that would exceed `0xFFFFFF`, keeping the stored AVP |
-| `DiameterFlipRequest` | 1/1 | — | Toggles the request bit, turning a request into an answer and back; P is kept in both directions, T is cleared when it produces an answer and E when it produces a request |
-| `DiameterAvpEncap` | 1/1 | `CODE` (required); `VENDORID`, `MANDATORY` | Prepends an AVP header (8 bytes, or 12 with `VENDORID`) and pads the AVP to a 4-octet boundary; drops a value whose AVP Length would exceed `0xFFFFFF` |
+| `DiameterFlipRequest` | 1/1 | — | Toggles the request bit, turning a request into an answer and back; validates the whole message first; P is kept in both directions, T is cleared when it produces an answer and E when it produces a request |
+| `DiameterAvpEncap` | 1/1 | `CODE` (required); `VENDORID`, `MANDATORY` | Prepends an AVP header (8 bytes, or 12 with `VENDORID`) and pads the AVP to a 4-octet boundary; drops a value whose AVP Length would exceed `0xFFFFFF`; a repeated keyword fails configuration |
 | `DiameterAvpDecap` | 1/1 | — | Strips one AVP: consumes the AVP whole when octets follow it, otherwise forwards its value (header 8 bytes, or 12 following the V bit; padding dropped either way) |
 
 Documentation
@@ -225,11 +225,11 @@ warning naming the element and reason, and no `Print` line — while
 `popstorepush-length-overflow.click` and `avp-encap-length-overflow.click` assert
 the other drop shape: a well-formed frame whose three-octet Length field cannot
 hold the result is dropped rather than wrapped, with a warning naming the field.
-Nineteen configs assert a configure failure: the two `DiameterEncap` flag pairs,
-the two `VENDORSPEC` and `VENDOR` refusals, six `DiameterPushAVP` value-source
-conflicts, three repeated-keyword configs, two generator-cap configs, and the
-CODE-range configs in both writers. Each expects a non-zero exit, the named
-argument in the error, and no `Print` line. `tests/manpages.bats` reads
+Twenty-one configs assert a configure failure: the two `DiameterEncap` flag
+pairs, the two `VENDORSPEC` and `VENDOR` refusals, six `DiameterPushAVP`
+value-source conflicts, five repeated-keyword configs, two generator-cap
+configs, and the CODE-range configs in both writers. Each expects a non-zero
+exit, the named argument in the error, and no `Print` line. `tests/manpages.bats` reads
 the prefix the Click binary lives in and asserts one page per element, with its
 arguments, handlers and the package element list, whose entries sit under a
 known category with a summary; it also checks that the six readers document
@@ -247,9 +247,9 @@ received frame — `DiameterDecap`, `DiameterAvpDecap`, `DiameterFlipRequest`,
 `DiameterPushAVP`, `DiameterPopAVP` and `DiameterPopStorePushAVP` — validate it
 first and drop it with one `ELEMENT: dropping malformed packet: REASON` line per
 packet: the five that read a message check its Version, its Length — which must
-be a multiple of 4 as well as equal to the packet — and its flags, and
-`DiameterAvpDecap` checks the AVP framing it is handed. Drops are not throttled:
-a hostile source can flood the log, and that is accepted.
+be a multiple of 4 as well as equal to the packet — its flags, and the AVPs in
+its body, and `DiameterAvpDecap` checks the AVP framing it is handed. Drops are
+not throttled: a hostile source can flood the log, and that is accepted.
 
 AVPs are padded to a 4-octet boundary with zero octets, and the AVP Length
 counts only the header and the value (RFC 6733 §4.1). `DiameterAvpEncap` adds
@@ -258,16 +258,16 @@ message built from the encoder's output passes the message readers and a
 sequence of AVPs stays aligned. A standalone AVP that arrives without its
 padding still decodes to its value rather than being dropped.
 
-Messages are padded the same way. RFC 6733 §3 defines the Message Length as
-covering the header and the padded AVPs, so it is always a multiple of 4;
-`DiameterEncap` zero-pads its payload to that boundary and counts the pad in the
-Length, and `DiameterDecap` forwards the pad with the payload because the pad is
-part of the message. A payload already on the boundary gains no octet. Padding
-repairs the header rule only: a payload that is not already a sequence of padded
-AVPs does not become walkable, and an AVP reader drops it
-(`encap-padding-push-avp` pins the drop). A
-received Length that is not a multiple of 4 is rejected by every message
-reader with `the Length field is not a multiple of 4`.
+A message is the 20-octet header plus a sequence of those padded AVPs, so its
+Length is a multiple of 4 (§3). `DiameterEncap` therefore requires a body that is
+already on that boundary: it does not pad, because padding five octets into
+eight does not make them an AVP, and a frame built that way is one the package's
+own readers reject. A payload that is not a multiple of 4 is dropped with
+`the payload length is not a multiple of 4, so it cannot be a sequence of padded
+AVPs`; an aligned body that is not AVPs is forwarded and dropped by the next AVP
+reader (`encap-body-not-avps` pins that). A received Length that is not a
+multiple of 4 is rejected by every message reader with `the Length field is not
+a multiple of 4`.
 
 Flag policy
 -----------
@@ -317,16 +317,16 @@ config then emit the same octets. The identifiers are counters rather than
 draws: each field is unique for the first 2^32 messages of a run, so a repeated
 hop-by-hop or end-to-end value means a wrap, not the birthday collision a 32-bit
 draw reaches in a few hundred thousand messages, and the counters are atomic, so
-two router threads never share a value. The end-to-end field is a 32-bit counter
-presented with a twelve/twenty split: its high-order 12 bits advance when the
-low-order 20 bits wrap. RFC 6733 §3 only permits a reboot-time value in the high
-half and a random value in the low half; this package reads neither and the seed
-chooses both starting values, which is what keeps the run reproducible. A new
-run starts a new sequence from its seed; nothing is claimed across reboots. A
-seeded writer now consumes two draws at initialization instead of two per
-message, so a configuration that pairs it with a `RAND*` generator moves that
-generator's values from the second message on; `randomness-encap-push-avp` pins
-the new stream position. The `RAND*` generators consume the stream on every
+two router threads never share a value. The end-to-end field is a plain 32-bit
+counter; its high-order 12 bits advance when the low-order 20 bits wrap. RFC 6733
+§3 permits, but does not require, a reboot-time value in the high half and a
+random value in the low half on a new run; this package uses neither, and the
+seed chooses both starting values, which is what keeps the run reproducible. A
+new run starts a new sequence from its seed; nothing is claimed across reboots. A
+seeded writer consumes two draws at initialization instead of two per message,
+so a configuration that pairs it with a `RAND*` generator moves that generator's
+values from the second message on; `randomness-encap-push-avp` pins the stream
+position. The `RAND*` generators consume the stream on every
 draw, so successive values differ; without a seed every value comes from Click's
 own seed and varies from run to run. Reproduction assumes a
 single thread or a fixed order for the `RAND*` draws: a multi-threaded router's
@@ -336,14 +336,17 @@ distinct values.
 Known limitations
 -----------------
 
-One finding remains open, and it lands outside this repository: the Click fork
-`BabisK/click` still carries `conf/test.click`, which does not configure, and
-`etc/diameter/`, a stale in-tree copy of these elements (F-16; `findings.md`
-records the fork under its former name, `babisk/diameter`). The removal is one
-commit in that fork — delete `conf/test.click` and `etc/diameter/` there — so
-nothing in this package can perform or verify it. The package identity (F-14)
-and the stale include guards, the `<iostream>` includes in data-path elements
-and the dead `simple_action()` beside `push()` (F-15) are fixed, and
+Two open items remain outside this branch: the racy per-packet state of
+`DiameterPopStorePushAVP` when one instance is fed from two router threads (the
+other three writers keep theirs in locals), and the upstream Click fork
+`BabisK/click`, which still carries `conf/test.click`, which does not configure,
+and `etc/diameter/`, a stale in-tree copy of these elements (F-16; `findings.md`
+records the fork under its former name, `babisk/diameter`). The fork's removal is
+one commit there — delete `conf/test.click` and `etc/diameter/` — so nothing in
+this package can perform or verify it. Both items are recorded in
+`_bmad-output/implementation-artifacts/deferred-work.md`. The package identity
+(F-14) and the stale include guards, the `<iostream>` includes in data-path
+elements and the dead `simple_action()` beside `push()` (F-15) are fixed, and
 `tests/identity.bats` pins them. The symptom evidence for all three stays in
 `_bmad-output/specs/spec-diameter-package-hardening/findings.md`.
 
@@ -351,7 +354,8 @@ Layout
 ------
 
     configure.ac, Makefile.in   build entry points (autoconf, configure, make run here)
-    src/                        element sources: one .cc/.hh pair per element, plus diameter.hh
+    src/                        element sources: one .cc/.hh pair per element, plus
+                                diameter.hh and the shared configure check diameterconf.hh
     tests/                      smoke configs, byte-level, man page and identity assertions
 
 License

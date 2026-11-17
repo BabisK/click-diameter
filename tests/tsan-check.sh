@@ -12,7 +12,10 @@
 # only the frames of that access are judged. Click core races its own
 # bookkeeping on shutdown (Master, RouterThread, Discard), so those reports are
 # expected and are not this package's business; anything whose access frame is
-# in src/diameter.* is.
+# in src/diameter.* is. An access inside a Click header that the compiler inlined
+# into this package is attributed to click/string.hh and marked (diameter.uo+) on
+# that same frame, so the module suffix is a package frame too: without it a
+# shared-String race is reported as Click code and ignored.
 #
 # Expects a Click and a package that were both built with -fsanitize=thread.
 # Exits 0 when every config ran and no package frame raced, 1 on a race or a
@@ -69,7 +72,7 @@ for config in "$@"; do
 	races=$(awk '
 		/^SUMMARY: ThreadSanitizer/ { inreport = 0 }
 		/ThreadSanitizer: data race/ { inreport = 1 }
-		inreport && /^ *#0 / && /src\/diameter[^ ]*:/ { print }
+		inreport && /^ *#0 / && (/src\/diameter[^ ]*:/ || /\(diameter\.uo\+/) { print }
 	' "$out")
 
 	if [ -n "$races" ]; then

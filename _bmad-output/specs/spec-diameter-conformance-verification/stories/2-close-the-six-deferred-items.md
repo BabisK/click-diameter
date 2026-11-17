@@ -24,7 +24,7 @@ and DW-6 (an unbounded `RAND*STRING` count is materialised before the length
 guard drops it). Each is either an unprotected path or an observation gap.
 
 **Approach:** close the observation gaps with configs (DW-1, DW-3), add a shared
-duplicate-keyword check to every configurable element (DW-2), add the missing
+duplicate-keyword check to each of the four configurable elements (DW-2), add the missing
 three-octet ceilings as run-time drops with their own warnings (DW-4, DW-5), and
 reject an impossible generator count at configure time (DW-6). The stored AVP is
 kept when a PopStorePush push cannot fit, so a later packet can carry it.

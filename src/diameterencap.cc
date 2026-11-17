@@ -89,47 +89,45 @@ Packet* DiameterEncap::simple_action(Packet * p_in)
 	// packet's Length.
 	DiameterHeader header = dh;
 
-	// RFC 6733 section 3: the Message Length covers the header and the padded
-	// AVPs, so it is always a multiple of 4. A payload that is not on the
-	// boundary is zero-padded, and the pad octets are part of the message:
-	// (payloadLength + 3) & ~3u is the message-level twin of
-	// AvpHeader::getLengthPadded().
+	// RFC 6733 section 3 defines the Message Length as the header plus the
+	// padded AVPs, so it is always a multiple of 4 and the body is a sequence
+	// of already-padded AVPs. A payload that is not on that boundary cannot be
+	// such a sequence, and padding it would repair bytes that are not a
+	// message into a frame that looks like one -- exactly what this package's
+	// own readers then reject. Drop it instead and leave the caller to build
+	// the body with DiameterAvpEncap.
 	const uint32_t payloadLength = p_in->length();
-	const uint32_t paddedLength = (payloadLength + 3) & ~3u;
-	const uint32_t paddingLength = paddedLength - payloadLength;
+	if ((payloadLength & 3u) != 0)
+	{
+		click_chatter("%s: dropping packet: the payload length is not a multiple of 4, so it cannot be a sequence of padded AVPs (RFC 6733 section 3)", class_name());
+		p_in->kill();
+		return 0;
+	}
 	// RFC 6733 section 3 fixes the Message Length at three octets. A payload
-	// that cannot fit even after padding is dropped with its own warning: the
-	// header would otherwise wrap and declare a length the frame does not have.
-	// The guard runs before the counters so a dropped packet consumes no
-	// identifier, and before push() so the drop prints no Put advisory.
-	if (paddedLength > DIAMETER_MAX_24BIT_VALUE - DIAMETER_MESSAGE_HEADER_LENGTH)
+	// that cannot fit is dropped with its own warning: the header would
+	// otherwise wrap and declare a length the frame does not have. The guard
+	// runs before the counters so a dropped packet consumes no identifier, and
+	// before push() so the drop prints no Put advisory.
+	if (payloadLength > DIAMETER_MAX_24BIT_VALUE - DIAMETER_MESSAGE_HEADER_LENGTH)
 	{
 		click_chatter("%s: dropping packet: the message Length would exceed the three-octet field (RFC 6733 section 3)", class_name());
 		p_in->kill();
 		return 0;
 	}
+	header.setLength(DIAMETER_MESSAGE_HEADER_LENGTH + payloadLength);
+
+	// The extension can fail: Click returns a null packet and frees the
+	// current one when it cannot allocate the copy. Drop the packet rather than
+	// dereference the result. The identifiers advance only after this check,
+	// so a packet that is never emitted consumes no identifier.
+	WritablePacket* wp = p_in->push(DIAMETER_MESSAGE_HEADER_LENGTH);
+	if (!wp)
+		return 0;
 	// The identifiers come from the two counters, not from the RNG, so each is
 	// unique for the first 2^32 messages of the run. The counters are atomic,
 	// so two router threads never share a value.
 	header.setHbh(ids.nextHbh());
 	header.setE2e(ids.nextE2e());
-	header.setLength(DIAMETER_MESSAGE_HEADER_LENGTH + paddedLength);
-
-	// Both extensions can fail: Click returns a null packet and frees the
-	// current one when it cannot allocate the copy. Drop the packet rather than
-	// dereference the result; the frame is not yet well formed, so the only
-	// fault to report is the allocation failure itself.
-	WritablePacket* wp = p_in->push(DIAMETER_MESSAGE_HEADER_LENGTH);
-	if (!wp)
-		return 0;
-	if (paddingLength > 0)
-	{
-		wp = wp->put(paddingLength);
-		if (!wp)
-			return 0;
-		memset(wp->data() + DIAMETER_MESSAGE_HEADER_LENGTH + payloadLength,
-				0, paddingLength);
-	}
 	header.encode(wp->data());
 
 	return wp;

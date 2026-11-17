@@ -32,7 +32,9 @@ aligned. The AVP Length is three octets, so a value that cannot fit is dropped
 with C<DiameterAvpEncap: dropping packet: the AVP Length would exceed the
 three-octet field (RFC 6733 section 4.1)> rather than emitted with a wrapped
 field. The payload is not validated or interpreted; this element is a writer,
-not a reader.
+not a reader. A keyword repeated in one configuration fails configuration too,
+with C<the CODE argument is given more than once>, rather than silently keeping
+the last value.
 
 Keyword arguments are:
 

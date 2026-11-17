@@ -21,25 +21,28 @@ prepends a Diameter header to each packet
 =d
 
 Prepends a 20-octet Diameter header to every incoming packet. The header
-carries version 1, Length 20 plus the padded payload, the Command Code CODE,
-the Application-Id APPID, and hop-by-hop and end-to-end identifiers. Each
+carries version 1, Length 20 plus the payload, the Command Code CODE, the
+Application-Id APPID, and hop-by-hop and end-to-end identifiers. Each
 identifier is seeded once from click_random() when the element is initialized and
 then advanced by one for every message the element emits, so each field is unique
 for the first 2^32 messages of a run and RandomSeed reproduces the sequence byte
-for byte. The end-to-end field is a 32-bit counter presented with a twelve/
-twenty split: its high-order 12 bits advance when the low-order 20 bits wrap.
-RFC 6733 section 3 only permits a reboot-time value in the high half and a random
-value in the low half; this element reads neither, and the seed chooses both
-starting values. A new run starts a new sequence from its seed; nothing is
-claimed across reboots. RFC 6733 section 3 requires the Message Length to be a
-multiple of 4, so the payload is zero-padded up to a 4-octet boundary and the pad
-octets count in the Length: a 5-octet payload gains three zero pad octets and
-Length 28, while a payload already on the boundary gains none and keeps its
-bytes. The pad is part of the message, so DiameterDecap forwards it along with
-the payload. Padding satisfies the Length rule only: a payload that is not
-already a sequence of padded AVPs is not made walkable, and an element that walks
-the body (DiameterPushAVP, DiameterPopAVP, DiameterPopStorePushAVP) drops it with
-C<AVP length below its header> or a related reason.
+for byte. The end-to-end field is a plain 32-bit counter; its high-order 12 bits
+advance when the low-order 20 bits wrap. RFC 6733 section 3 permits, but does not
+require, a reboot-time value in the high half and a random value in the low half
+on a new run; this element uses neither, and the seed chooses both starting
+values. A new run starts a new sequence from its seed; nothing is claimed across
+reboots.
+
+RFC 6733 section 3 defines the Message Length as the header plus the padded
+AVPs, so it is always a multiple of 4 and the body is a sequence of padded AVPs.
+The element does not interpret the payload: a payload already on that boundary is
+forwarded unchanged and keeps its Length, while a payload that is not on it is
+dropped with C<DiameterEncap: dropping packet: the payload length is not a
+multiple of 4, so it cannot be a sequence of padded AVPs (RFC 6733 section 3)>
+rather than zero-padded into a frame that only looks like a message. A zero-octet
+packet is legal (the message has no AVPs). A body that happens to be aligned but
+is not AVPs is forwarded as given and dropped by whichever AVP reader follows;
+build a conformant body with DiameterAvpEncap.
 
 CODE and REQUEST are required. The flags start clear and only the arguments the
 caller names are set: E from ERROR, P from PROXIABLE and T from RETRANSMITED.
@@ -52,11 +55,13 @@ element has no request to consult, so the caller's declaration stands.
 The Command Code field is three octets (RFC 6733 section 3), so CODE must not
 exceed 0xFFFFFF: a larger value fails configuration with an error naming the
 argument rather than being truncated on the wire. The two experimental values
-section 3.1 reserves, 0xFFFFFE and 0xFFFFFF, are in range. The Message Length is
-three octets too, so a payload that cannot fit even after padding is dropped with
+that section 3.1 reserves, 0xFFFFFE and 0xFFFFFF, are in range. The Message
+Length is three octets too, so a payload that cannot fit is dropped with
 C<DiameterEncap: dropping packet: the message Length would exceed the three-octet
 field (RFC 6733 section 3)> rather than emitted with a wrapped field, and a
-dropped packet consumes no identifier.
+dropped packet consumes no identifier. A keyword repeated in one configuration
+fails configuration too, with C<the CODE argument is given more than once>,
+rather than silently keeping the last value.
 
 The element does not validate the incoming packet; it is a writer, not a
 reader.

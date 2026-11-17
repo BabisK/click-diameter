@@ -25,6 +25,10 @@ deferred:
     location: >-
       src/diameterencap.cc:63, src/diameterpopstorepushavp.cc:85
     severity: medium
+    closed: >-
+      Closed by the run-time ceilings in both elements and the
+      encap-length-overflow and popstorepush-length-overflow configs; the
+      store-retained config pins that a drop keeps the stored AVP.
   - summary: >-
       DiameterAvpEncap truncates the three-octet AVP Length (RFC 6733 section
       4.1) for a value above 0xFFFFFF - 12.
@@ -37,6 +41,10 @@ deferred:
     location: >-
       src/diameteravpencap.cc:54
     severity: medium
+    closed: >-
+      Closed by the run-time AVP Length ceiling and the
+      avp-encap-length-overflow, avp-encap-length-max and
+      avp-encap-length-max-vendor configs, which pin both sides of the boundary.
   - summary: >-
       A RAND*STRING count is unbounded and the value is materialised before the
       ceiling guard decides to drop, so an always-overflowing config pays its
@@ -54,6 +62,10 @@ deferred:
     location: >-
       src/diameterpushavp.cc:190-233
     severity: low
+    closed: >-
+      Closed by the configure-time cap on all four RAND*STRING counts and the
+      push-avp-randhex-too-large and -vendor configs; the value is refused before
+      it is materialised.
 ---
 
 <intent-contract>
