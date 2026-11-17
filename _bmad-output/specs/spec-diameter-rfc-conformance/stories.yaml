@@ -1,0 +1,104 @@
+- id: "1"
+  title: Make per-packet state local so elements are SMP-safe
+  description: >-
+    Build the AVP header and value state per packet in DiameterEncap,
+    DiameterAvpEncap and DiameterPushAVP instead of mutating element members,
+    satisfying CAP-5. No argument or byte changes; single-threaded output stays
+    identical.
+  spec_checkpoint: true
+  invoke_dev_with: >-
+    Reproduce with two DiameterRatedSource elements feeding one DiameterPushAVP
+    under `click -t 2`, asserting the AVP Length in every output frame. Run the
+    element under ThreadSanitizer. Leave configuration values in members; only
+    per-packet state moves to locals.
+
+- id: "2"
+  title: Reject V=1 with Vendor-Id 0 on write and read
+  description: >-
+    Initialise the Vendor-Id in DiameterPushAVP, reject VENDORSPEC true without
+    VENDOR at configure time, and add the receive-side check that drops an AVP
+    with V=1 and Vendor-Id 0, satisfying CAP-1 and CAP-3 for A-1 and A-6.
+  invoke_dev_with: >-
+    Land the writer and reader halves in one change so they agree. Reproduce A-1
+    with VENDORSPEC true and no VENDOR; reproduce A-6 with the 12-octet
+    V=1/Vendor-Id-0 AVP. Copy the V-bit handling DiameterAvpEncap already uses.
+
+- id: "3"
+  title: Add MANDATORY to DiameterPushAVP
+  description: >-
+    Add a MANDATORY argument that sets the AVP M bit, defaulting to false so
+    existing configs keep their bytes, satisfying CAP-1 for A-2. Document the
+    argument in the element header.
+  invoke_dev_with: >-
+    Pin M=1 with a new tests/configs config and confirm the existing push-avp
+    configs still emit M=0. This is the change that decides whether the package
+    can emit a conformant base-protocol AVP.
+
+- id: "4"
+  title: Encode UINT32 0 as a four-octet value
+  description: >-
+    Track whether a numeric value was supplied and key the AVP Length off that
+    rather than off the value being non-zero, satisfying CAP-1 for A-3. Keep an
+    empty OCTETSTRING at Length 8.
+  invoke_dev_with: >-
+    Pin `UINT32 0` at Length 12 with a four-octet zero, and a RANDUINT32 draw of
+    zero at four octets. Do not change the empty-OctetString case, which RFC 6733
+    section 4.2 permits at Length 8.
+
+- id: "5"
+  title: Reject conflicting value arguments
+  description: >-
+    Fail configure when more than one value source is supplied to
+    DiameterPushAVP, naming both arguments, satisfying CAP-1 for A-10. Update the
+    man page precedence text to match.
+  invoke_dev_with: >-
+    The value sources are OCTETSTRING, UINT32, RANDUINT32, RANDALPHANUMSTRING,
+    RANDNUMSTRING, RANDALPHASTRING and RANDHEXSTRING. Follow the configure-error
+    style DiameterEncap already uses for ERROR on a request.
+
+- id: "6"
+  title: Enforce 4-octet message alignment on write and read
+  description: >-
+    Zero-pad a DiameterEncap payload to a 4-octet boundary and add the
+    reader-side alignment reason to the shared header check, satisfying CAP-2 and
+    CAP-3 for A-4.
+  spec_checkpoint: true
+  invoke_dev_with: >-
+    A 5-octet payload must produce a 28-octet frame with three zero pad octets
+    and Length 28. Add DIAMETER_CHECK_LENGTH_NOT_ALIGNED in the same change so
+    the package cannot emit a frame its own readers reject.
+
+- id: "7"
+  title: Validate Version in every reader
+  description: >-
+    Add a bad-Version reason and test buffer[0] == 1 first in the shared header
+    check, satisfying CAP-3 for A-5. Confirm no rewriting element can re-emit a
+    Version 2 frame.
+  invoke_dev_with: >-
+    Reproduce with the 20-octet frame beginning `02 00 00 14 80 00 01 18`.
+    DiameterPushAVP, DiameterPopAVP, DiameterPopStorePushAVP and
+    DiameterFlipRequest must all drop it rather than round-trip it.
+
+- id: "8"
+  title: Reject out-of-range Command Code and Length
+  description: >-
+    Reject CODE above 0xFFFFFF at configure time in DiameterEncap and
+    DiameterRatedSource, and drop a DiameterPushAVP message that would exceed the
+    three-octet Length field, satisfying CAP-2 for A-9.
+  invoke_dev_with: >-
+    Reproduce with CODE 16777496, which currently emits Command Code 0x000118.
+    The Length guard is a run-time drop with a warning, since the final length
+    depends on the value.
+
+- id: "9"
+  title: Make identifiers unique within a run
+  description: >-
+    Replace per-packet random Hop-by-Hop and End-to-End identifiers with a
+    per-element counter seeded once from click_random, with the time component on
+    End-to-End, satisfying CAP-4 for A-7.
+  spec_checkpoint: true
+  invoke_dev_with: >-
+    A seeded run of 240 000 messages at RATE 1000 must show no duplicate
+    Hop-by-Hop or End-to-End identifier, and two runs with the same RandomSeed
+    must be byte-identical. No srand or rand. Across-reboot uniqueness is out of
+    scope by SPEC constraint.
