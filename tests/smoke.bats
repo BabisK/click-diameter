@@ -21,7 +21,14 @@
 # malformed-* tests assert the drop path instead: exit 0, one warning naming the
 # element and reason, and no Print line. The two configs the package refuses --
 # ERROR on a request and RETRANSMITED on an answer -- assert the configure path:
-# Click's whole configure-failure output and no Print line.
+# Click's whole configure-failure output and no Print line. The smp-* tests are
+# the ones run under `click -j 2`, with StaticThreadSched putting two producers
+# on two router threads: the Encap and AvpEncap frames derive their Length from
+# the packet, so a cross-thread write leaves the declared Length disagreeing
+# with the printed octets, while the PushAVP frame is a shape check because its
+# AVP Length comes from configuration. All three skip on a Click built without
+# multithread support, and none of them can see a race in shared value storage:
+# ThreadSanitizer is what proves that.
 
 click=${CLICK:-click}
 click_timeout=${CLICK_TIMEOUT:-10}
@@ -38,6 +45,35 @@ run_config() {
 # run_click CONFIG -- run configs/CONFIG under a timeout, capturing the output.
 run_click() {
 	run_config "$BATS_TEST_DIRNAME/configs/$1"
+}
+
+# run_click_threads N CONFIG -- run configs/CONFIG on N router threads under a
+# timeout, capturing the output. Needs a Click built with
+# --enable-user-multithread; the caller skips instead of passing on one thread.
+run_click_threads() {
+	if command -v timeout >/dev/null 2>&1; then
+		run timeout "$click_timeout" "$click" -j "$1" "$BATS_TEST_DIRNAME/configs/$2"
+	else
+		run "$click" -j "$1" "$BATS_TEST_DIRNAME/configs/$2"
+	fi
+}
+
+# smp_skip_or_fail -- the gate every -j 2 test passes before reading frames.
+# A Click built without --enable-user-multithread warns and then runs one
+# thread, so there is no race to exercise and the test skips; check the run's
+# status first so a config that failed for another reason cannot be skipped.
+# A Click that runs but rejects the config's thread preference has not put the
+# producers on two threads either, and that is a failure: it would silently
+# turn the discriminating tests back into shape checks.
+smp_skip_or_fail() {
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	if grep -qF 'Click was built without multithread support, running single threaded' <<<"$output"; then
+		skip "this Click was built without multithread support"
+	fi
+	if grep -qF 'thread preference' <<<"$output"; then
+		echo "thread preference rejected, so the producers never reached two threads"
+		return 1
+	fi
 }
 
 # expect OUTPUT -- the whole captured output, byte for byte.
@@ -179,6 +215,84 @@ expect_seeded() {
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
 	local expected='^rand-alpha-four: +32 \| 01000020 80000118 00000000 00000001 00000002 00000108 0000000c (4[1-9a-f]|5[0-9a]|6[1-9a-f]|7[0-9a]){4}$'
 	[[ "$output" =~ $expected ]] || { echo "expected: 32 octets, AVP Length 12, four letters from A-Z/a-z"; return 1; }
+}
+
+@test "smp-push-avp: two sources into one PushAVP stay per packet under -j 2" {
+	run_click_threads 2 smp-push-avp.click
+	smp_skip_or_fail
+	# Two header-only 20-octet requests into one append: every frame is the
+	# 20-octet message header, the 8-octet AVP header and the 8-octet generated
+	# value, 36 octets, message Length 0x24 and AVP Length 0x10. This is a
+	# shape check, not a race detector: the appended Length comes from
+	# configuration, so no interleaving can change it. The sources carry
+	# different Command Codes, and the floor above one LIMIT proves both pushed.
+	# The value is hex output, so pin the generator's alphabet per four octets:
+	# a byte from "0"-"9" prints as 3x and one from "A"-"F" as 4x.
+	local frame='^smp-push-avp: +36 \| 01000024 (80000118|80000119) 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000010 (3[0-9]|4[1-6]){4} (3[0-9]|4[1-6]){4}$'
+	local count=0 line
+	while IFS= read -r line; do
+		[[ "$line" =~ $frame ]] || { echo "unexpected frame: $line"; return 1; }
+		count=$((count + 1))
+	done <<<"$output"
+	[ "$count" -gt 1000 ] || { echo "expected more than one source's 1000 frames, got $count"; return 1; }
+	grep -q '80000118' <<<"$output" || { echo "expected frames from the CODE 280 source"; return 1; }
+	grep -q '80000119' <<<"$output" || { echo "expected frames from the CODE 281 source"; return 1; }
+}
+
+@test "smp-encap: two payload lengths through one Encap stay per packet under -j 2" {
+	run_click_threads 2 smp-encap.click
+	smp_skip_or_fail
+	# Encap derives the message Length from the packet in hand, so a
+	# cross-thread write between setLength and encode prints a frame whose
+	# Length field contradicts its octet count. Each frame must be one of the
+	# two shapes the payloads produce -- 4 octets give 24 with Length 0x18 and
+	# 8 octets give 28 with 0x1c -- so a frame that matches neither is the
+	# cross-thread write. Both shapes must appear and the count must exceed one
+	# source's LIMIT, so a run where only one producer got through fails.
+	local four='^smp-encap: +24 \| 01000018 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} deadbeef$'
+	local eight='^smp-encap: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} deadbeef 01020304$'
+	local count=0 fours=0 eights=0 line
+	while IFS= read -r line; do
+		if [[ "$line" =~ $four ]]; then
+			fours=$((fours + 1))
+		elif [[ "$line" =~ $eight ]]; then
+			eights=$((eights + 1))
+		else
+			echo "unexpected frame: $line"
+			return 1
+		fi
+		count=$((count + 1))
+	done <<<"$output"
+	[ "$count" -gt 5000 ] || { echo "expected more than one source's 5000 frames, got $count"; return 1; }
+	[ "$fours" -gt 0 ] || { echo "expected 24-octet frames from the 4-octet payload"; return 1; }
+	[ "$eights" -gt 0 ] || { echo "expected 28-octet frames from the 8-octet payload"; return 1; }
+}
+
+@test "smp-avpencap: two payload lengths through one AvpEncap stay per packet under -j 2" {
+	run_click_threads 2 smp-avpencap.click
+	smp_skip_or_fail
+	# AvpEncap derives the AVP Length from the packet in hand, so the same
+	# cross-thread write leaves an AVP Length that disagrees with the octets
+	# printed after it. A 4-octet value is a 12-octet AVP with Length 0x0c and
+	# an 8-octet value a 16-octet AVP with Length 0x10; neither needs padding.
+	# A frame that matches neither shape is the cross-thread write.
+	local four='^smp-avpencap: +12 \| 00000108 0000000c deadbeef$'
+	local eight='^smp-avpencap: +16 \| 00000108 00000010 deadbeef 01020304$'
+	local count=0 fours=0 eights=0 line
+	while IFS= read -r line; do
+		if [[ "$line" =~ $four ]]; then
+			fours=$((fours + 1))
+		elif [[ "$line" =~ $eight ]]; then
+			eights=$((eights + 1))
+		else
+			echo "unexpected frame: $line"
+			return 1
+		fi
+		count=$((count + 1))
+	done <<<"$output"
+	[ "$count" -gt 5000 ] || { echo "expected more than one source's 5000 frames, got $count"; return 1; }
+	[ "$fours" -gt 0 ] || { echo "expected 12-octet frames from the 4-octet value"; return 1; }
+	[ "$eights" -gt 0 ] || { echo "expected 16-octet frames from the 8-octet value"; return 1; }
 }
 
 @test "pop-avp: removing the last AVP from a two-AVP message" {

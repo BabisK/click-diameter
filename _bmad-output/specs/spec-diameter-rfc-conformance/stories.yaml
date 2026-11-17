@@ -102,3 +102,28 @@
     Hop-by-Hop or End-to-End identifier, and two runs with the same RandomSeed
     must be byte-identical. No srand or rand. Across-reboot uniqueness is out of
     scope by SPEC constraint.
+
+- id: "10"
+  title: Enable multithreaded Click in CI so the SMP tests run
+  description: >-
+    Build the CI Click with --enable-user-multithread and bump the prefix cache
+    key, so the three smp-* configs exercise two router threads in the gate
+    instead of reporting a skip. Closes the CI deferral recorded by story 1.
+  invoke_dev_with: >-
+    Change only the Click configure line and the cache key; leave every other
+    step alone. Confirm the suite is green on a two-CPU pin, since a CI runner is
+    much smaller than a workstation and the two-thread tests depend on the two
+    producers overlapping.
+
+- id: "11"
+  title: Gate the two-thread configs on ThreadSanitizer in CI
+  description: >-
+    Add a CI job that builds Click and this package with -fsanitize=thread and
+    runs tests/tsan-check.sh over the three smp-* configs, so the shared-String
+    and shared-header races story 1 fixed are caught by the gate instead of a
+    manual procedure. Closes story 1's remaining detection deferral.
+  invoke_dev_with: >-
+    Judge reports by their racing access frame, not by the sanitizer's exit
+    status: Click's own shutdown races make TSan exit non-zero on a clean
+    package. Keep the plain job untouched apart from its existing multithread
+    flag, and give the sanitizer prefix its own cache key.

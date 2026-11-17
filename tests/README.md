@@ -76,9 +76,83 @@ reseed fails even though no byte assertion can see `configure()`.
 
 The `rand-*` tests pin the length and the alphabet of each `DiameterPushAVP`
 generator; one of them appends 10 kB to the packet, so Click prints its
-`expensive Packet::put` advisory beside the `Print` line. The `malformed-*`
-configs assert the drop path instead: exit 0, no `Print` line, and exactly one
-warning naming the element and reason.
+`expensive Packet::put` advisory beside the `Print` line.
+
+The three `smp-*` tests are the only ones that run under `click -j 2`.
+Multithreading is a Click build option, so they need a Click configured with
+`--enable-user-multithread`; a plain build prints `warning: Click was built
+without multithread support, running single threaded` and `-j 2` silently
+degrades. Each test therefore checks the run's exit status, then skips with a
+reason on that warning, and then fails if the run reports a rejected `thread
+preference` — because a config whose `StaticThreadSched` line did not take
+effect runs single threaded and would quietly turn these tests back into shape
+checks. `StaticThreadSched` is load-bearing: delete it and the pre-change
+package passes the two discriminating tests again.
+
+To run them locally, build a second Click and this package against it:
+
+```bash
+git -C ../click archive 9197a594b | tar -x -C ../click-mt-src
+cd ../click-mt-src && ./configure --prefix="$HOME/click-mt" --disable-linuxmodule \
+  --enable-user-multithread && make -j8 && make install
+cd <package> && ./configure --with-click="$HOME/click-mt" --prefix="$HOME/click-mt" \
+  && make && make install
+CLICK="$HOME/click-mt/bin/click" bats --tap --filter 'smp-' tests
+```
+
+CI builds its Click with that flag, so the gate runs all three. Without it a
+local run reports a skip, and the two-thread evidence comes from a run like the
+one above or from the ThreadSanitizer check below.
+
+What each one proves, and what it does not:
+
+- `smp-encap` and `smp-avpencap` prove that `DiameterEncap` and
+  `DiameterAvpEncap` derive their Length from the packet in hand. Their two
+  producers send a 4- and an 8-octet payload, so the header Length and the AVP
+  Length differ per frame; a write into a shared member between `setLength` and
+  `encode` makes one frame carry the other packet's Length, and the test fails
+  on it. The per-run frame count is high on purpose: on the build before this
+  fix the same configs produced 20 to 37 mismatched frames in roughly 9500, so a
+  short run could pass by luck. Only the first source stops the run, so the
+  second keeps pushing until then.
+- `smp-push-avp` is a shape and regression check, not a race detector:
+  `DiameterPushAVP` takes its AVP Length from configuration, so every frame it
+  appends has the same Length no matter which thread wins. Its two sources carry
+  different Command Codes, so the output shows that both threads pushed, but a
+  verdict on that element's shared state needs ThreadSanitizer.
+
+None of the three can see a race in `DiameterPushAVP`'s shared value `String`:
+a corrupted value is still hex, so any regex over the printed octets accepts it.
+ThreadSanitizer is what proves that part, and it is the reproducible negative
+control for all three elements: on the pre-change package it reports races
+rooted at `diameterpushavp.cc`'s `datastring` assignment and aborts, while a
+fixed package reports no racing access inside this package at all.
+
+`tests/tsan-check.sh CLICK CONFIG...` runs that check. CI runs it in the
+`thread-sanitizer` job against a Click and a package built with
+`-fsanitize=thread`, so no edge case here depends on someone remembering a
+manual step. The script judges reports, not the sanitizer's exit status: Click
+races its own shutdown bookkeeping and exits 66 on a clean package, so a
+non-zero status from `click` is a crash, and the gate is any race whose racing
+access (`#0` frame) is in `src/diameter.*`. It also fails if the installed
+module does not link `libtsan`, which is the trap a plain `make install` into a
+sanitizer prefix leaves.
+
+To reproduce locally, build the pair the way the job does:
+
+```bash
+env CXXFLAGS="-fsanitize=thread -g -O1" LDFLAGS="-fsanitize=thread" \
+  ./configure --prefix="$HOME/click-tsan" --disable-linuxmodule --enable-user-multithread
+env CXXFLAGS="-fsanitize=thread -g -O1" LDFLAGS="-fsanitize=thread" make -j8 && make install
+# then, from the package:
+./configure --with-click="$HOME/click-tsan" --prefix="$HOME/click-tsan"
+make CXXFLAGS="-fsanitize=thread -g -O1 -Wall -Wextra -fPIC -shared"
+make install CXXFLAGS="-fsanitize=thread -g -O1 -Wall -Wextra -fPIC -shared"
+tests/tsan-check.sh "$HOME/click-tsan/bin/click" tests/configs/smp-*.click
+```
+
+The `malformed-*` configs assert the drop path instead: exit 0, no `Print`
+line, and exactly one warning naming the element and reason.
 
 Malformed input is dropped, never forwarded. A drop is asserted with
 `expect_drop`, which requires exit 0, exactly one warning of the form
@@ -99,7 +173,10 @@ config (path and line, the `While configuring` line, the named error, and
 path; every other `encap-*` config configures and prints bytes.
 
 CI runs the same command on every pull request and every push to `master`, plus
-monthly against the latest Click master, so a local pass is the same check.
+monthly against the latest Click master, so a local pass over the same Click is
+the same check. CI's Click is built with `--enable-user-multithread`, so the
+three `smp-*` tests run there rather than skipping; only the ThreadSanitizer
+check stays a local run.
 
 ## configs/
 
@@ -114,6 +191,9 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `rand-hex-alphabet.click` | `RANDHEXSTRING 10000` draws all 10,000 characters from `0`-`9`/`A`-`F` (F-9) |
 | `rand-num-four.click` | `RANDNUMSTRING 4` emits four digits: AVP Length 12 |
 | `rand-alpha-four.click` | `RANDALPHASTRING 4` emits four letters: AVP Length 12 |
+| `smp-push-avp.click` | two `DiameterRatedSource` elements on two threads into one `DiameterPushAVP` under `click -j 2`: every frame is one 36-octet append, Length `0x24`, AVP Length `0x10`, and both sources' Command Codes appear (CAP-5 shape check) |
+| `smp-encap.click` | two 4- and 8-octet payloads on two threads into one `DiameterEncap`: every frame's Length matches its octets, so a cross-thread write fails the run (CAP-5) |
+| `smp-avpencap.click` | the same two payloads on two threads into one `DiameterAvpEncap`: every frame's AVP Length matches its octets (CAP-5) |
 | `pop-avp.click` | removing the last AVP from a two-AVP message |
 | `avp-roundtrip.click` | `DiameterAvpEncap` then `DiameterAvpDecap` returns the payload |
 | `avp-padding.click` | a 5-octet value pads to a 16-octet AVP: Length 13, three zero octets |

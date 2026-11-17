@@ -53,12 +53,17 @@ int DiameterEncap::configure(Vector<String> &conf, ErrorHandler *errh)
 
 Packet* DiameterEncap::simple_action(Packet * p_in)
 {
-	dh.setHbh(click_random());
-	dh.setE2e(click_random());
-	dh.setLength(DIAMETER_MESSAGE_HEADER_LENGTH + p_in->length());
+	// Click does not serialise a push element across router threads, so the
+	// configured header is copied and filled per packet: two packets must not
+	// interleave inside a shared header and stamp one frame with the other
+	// packet's Length.
+	DiameterHeader header = dh;
+	header.setHbh(click_random());
+	header.setE2e(click_random());
+	header.setLength(DIAMETER_MESSAGE_HEADER_LENGTH + p_in->length());
 
 	WritablePacket* wp = p_in->push(DIAMETER_MESSAGE_HEADER_LENGTH);
-	dh.encode(wp->data());
+	header.encode(wp->data());
 
 	return wp;
 }

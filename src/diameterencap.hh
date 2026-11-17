@@ -86,6 +86,8 @@ public:
     Packet *simple_action(Packet * p_in);
 
 private:
+    // Configuration only: configure() fills it, and simple_action() copies it
+    // into a local header per packet instead of writing it.
     DiameterHeader dh;
 };
 

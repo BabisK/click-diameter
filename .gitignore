@@ -41,6 +41,8 @@ Kbuild
 Makefile
 Module.symvers
 autom4te*
+configure~
+*~
 config.h
 config.log
 config.status
