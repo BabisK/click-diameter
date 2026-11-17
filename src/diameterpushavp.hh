@@ -12,7 +12,7 @@ CLICK_DECLS
 /*
 =c
 
-DiameterPushAVP(CODE [, VENDORSPEC, VENDOR, OCTETSTRING, UINT32, RANDUINT32, RANDALPHANUMSTRING, RANDNUMSTRING, RANDALPHASTRING, RANDHEXSTRING])
+DiameterPushAVP(CODE [, VENDORSPEC, VENDOR, MANDATORY, OCTETSTRING, UINT32, RANDUINT32, RANDALPHANUMSTRING, RANDNUMSTRING, RANDALPHASTRING, RANDHEXSTRING])
 
 =s basicmod
 
@@ -21,8 +21,8 @@ appends an AVP to each Diameter message
 =d
 
 Appends one AVP to the end of every Diameter message and updates the message
-Length field. The AVP carries the AVP Code CODE and an M bit that is always
-clear; the V bit and the vendor id come from VENDORSPEC and VENDOR. The AVP is
+Length field. The AVP carries the AVP Code CODE and an M bit from MANDATORY;
+the V bit and the vendor id come from VENDORSPEC and VENDOR. The AVP is
 padded to a 4-octet boundary with zero octets, and its own Length counts the
 header and the value but not that padding, per RFC 6733 section 4.1. The header
 is 8 octets, or 12 when VENDORSPEC is true.
@@ -65,6 +65,13 @@ Default is false.
 Integer. Required when VENDORSPEC is true and must be non-zero: the Vendor-Id
 written into the vendor header. When VENDORSPEC is false the vendor id is 0 and
 VENDOR is ignored.
+
+=item MANDATORY
+
+Boolean. If true the AVP's M bit is set, telling a receiving peer that support
+for this AVP is required (RFC 6733 section 4.1). M is 0x40 in the flags octet
+and is independent of the V bit (0x80), and setting it changes neither the AVP
+nor the message Length. Default is false.
 
 =item OCTETSTRING
 

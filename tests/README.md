@@ -196,6 +196,9 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `push-avp-vendor-missing.click` | `VENDORSPEC true` without `VENDOR` rejected at configure time (A-1, RFC 6733 §4.1.1) |
 | `push-avp-vendor-zero.click` | `VENDORSPEC true, VENDOR 0` rejected at configure time (RFC 6733 §4.1.1) |
 | `push-avp-vendor-unused.click` | `VENDOR 42` without `VENDORSPEC` is ignored: the AVP keeps the 8-octet non-vendor header |
+| `push-avp-mandatory.click` | `MANDATORY true` sets the M bit: AVP flags `40` rather than `00` (A-2, RFC 6733 §4.1) |
+| `push-avp-mandatory-vendor.click` | `MANDATORY true, VENDORSPEC true, VENDOR 42` sets M and V in separate bits: AVP flags `c0` |
+| `push-avp-mandatory-false.click` | `MANDATORY false` leaves the M bit clear: byte-identical to `push-avp.click` |
 | `push-avp-rand.click` | generated value, 8 characters |
 | `rand-alphanum-one.click` | `RANDALPHANUMSTRING 1` emits one character: AVP Length 9 and three zero pad octets (F-8) |
 | `rand-hex-one.click` | `RANDHEXSTRING 1` emits one character rather than an empty AVP (F-8) |

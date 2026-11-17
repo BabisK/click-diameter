@@ -80,11 +80,15 @@ int DiameterPushAVP::configure(Vector<String> &conf, ErrorHandler *errh)
 	// Likewise initialize the Vendor-Id: an absent VENDOR must not leak a
 	// stack slot into the header, and must be rejected when VENDORSPEC is set.
 	uint32_t vendorId = 0;
+	// The M bit defaults to clear, so an absent MANDATORY keeps the AVP bytes
+	// exactly as they were before the argument existed.
+	bool mandatory = false;
 
 	if (Args(conf, this, errh)
 		.read_m("CODE", code)
 		.read("VENDORSPEC", vendorSpec)
 		.read("VENDOR", vendorId)
+		.read("MANDATORY", mandatory)
 		.read("OCTETSTRING", datastring)
 		.read("UINT32", datauint)
 		.read("RANDUINT32", randUInt32)
@@ -101,7 +105,7 @@ int DiameterPushAVP::configure(Vector<String> &conf, ErrorHandler *errh)
 		return errh->error("the VENDOR argument must be non-zero when VENDORSPEC is true (RFC 6733 section 4.1.1)");
 
 	ah.setCode(code);
-	ah.setMandatory(false);
+	ah.setMandatory(mandatory);
 	ah.setVendorSpecific(vendorSpec);
 	if(vendorSpec)
 	{
