@@ -174,10 +174,23 @@ non-zero exit, Click's whole configure-failure output for that config (path and
 line, the `While configuring 'ELEMENT@N :: ELEMENT':` line, the named error, and
 `Router could not be initialized!`), and no `Print` line. The element is a
 parameter because more than one element refuses a configuration, and the `@N`
-suffix is matched with a wildcard rather than pinned. Four configs take that
+suffix is matched with a wildcard rather than pinned. Ten configs take that
 path: `encap-error-on-request.click`, `encap-retransmit-on-answer.click`,
-`push-avp-vendor-missing.click` and `push-avp-vendor-zero.click`; every other
-`encap-*` and `push-avp*` config configures and prints bytes.
+`push-avp-vendor-missing.click`, `push-avp-vendor-zero.click`,
+`push-avp-conflict-octetstring-uint32.click`,
+`push-avp-conflict-randnumstring-randhexstring.click`,
+`push-avp-conflict-empty-octetstring-uint32.click`,
+`push-avp-conflict-octetstring-randuint32.click`,
+`push-avp-conflict-randalphanumstring-randalphastring.click` and
+`push-avp-conflict-three.click`. The six conflict configs refuse more than one
+value source in one `DiameterPushAVP`, which accepts at most one, and the
+three-source one also pins that the error names the first conflicting pair in
+documented argument order;
+`push-avp-rand-zero.click`, `push-avp-randuint32-false.click` and
+`push-avp-duplicate-octetstring.click` pin the other side of that rule: a zero
+generator count and a false `RANDUINT32` supply nothing, and a repeated keyword
+is Click's last-wins rather than two sources, so each configuration prints
+bytes. Every other `encap-*` and `push-avp*` config configures and prints bytes.
 
 CI runs the same command on every pull request and every push to `master`, plus
 monthly against the latest Click master, so a local pass over the same Click is
@@ -195,6 +208,12 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `push-avp-vendor.click` | a vendor AVP carries V, AVP Length 15 and Vendor-Id 42: 36 octets in total (RFC 6733 §4.1.1) |
 | `push-avp-vendor-missing.click` | `VENDORSPEC true` without `VENDOR` rejected at configure time (A-1, RFC 6733 §4.1.1) |
 | `push-avp-vendor-zero.click` | `VENDORSPEC true, VENDOR 0` rejected at configure time (RFC 6733 §4.1.1) |
+| `push-avp-conflict-octetstring-uint32.click` | `OCTETSTRING` and `UINT32` together rejected at configure time, naming both arguments (A-10, CAP-1) |
+| `push-avp-conflict-randnumstring-randhexstring.click` | two `RAND*STRING` generators rejected at configure time rather than the first silently winning (A-10) |
+| `push-avp-conflict-empty-octetstring-uint32.click` | `OCTETSTRING ""` is a supplied source, so it conflicts with `UINT32 0` and both are named (A-10) |
+| `push-avp-conflict-octetstring-randuint32.click` | `RANDUINT32 true` is a supplied source, so it conflicts with `OCTETSTRING` and both are named (A-10) |
+| `push-avp-conflict-randalphanumstring-randalphastring.click` | two `RAND*STRING` generators rejected at configure time, naming both (A-10) |
+| `push-avp-conflict-three.click` | three supplied sources rejected naming the first conflicting pair in documented argument order (A-10) |
 | `push-avp-vendor-unused.click` | `VENDOR 42` without `VENDORSPEC` is ignored: the AVP keeps the 8-octet non-vendor header |
 | `push-avp-mandatory.click` | `MANDATORY true` sets the M bit: AVP flags `40` rather than `00` (A-2, RFC 6733 §4.1) |
 | `push-avp-mandatory-vendor.click` | `MANDATORY true, VENDORSPEC true, VENDOR 42` sets M and V in separate bits: AVP flags `c0` |
@@ -203,8 +222,11 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `push-avp-uint32-zero-vendor.click` | `UINT32 0` after the 12-octet vendor header is AVP Length 16: 36 octets (A-3, RFC 6733 §4.2) |
 | `push-avp-empty.click` | an empty `OCTETSTRING` keeps the 8-octet header-only AVP, the case that must not move (A-3, RFC 6733 §4.2) |
 | `push-avp-empty-vendor.click` | the same empty value after the 12-octet vendor header: AVP Length 12, 32 octets (A-3, RFC 6733 §4.2) |
-| `push-avp-no-value.click` | no string and no numeric source: AVP Length 8, 28 octets (A-3, RFC 6733 §4.2) |
+| `push-avp-no-value.click` | no value source at all (including a lone zero generator count or `RANDUINT32 false`): AVP Length 8, 28 octets (A-3, RFC 6733 §4.2) |
 | `push-avp-uint32.click` | `UINT32 2001` is the four-octet big-endian value `000007d1`: AVP Length 12, 32 octets |
+| `push-avp-randuint32-false.click` | `RANDUINT32 false` supplies nothing, so `OCTETSTRING` is the single source: byte-identical to `push-avp.click` (A-10) |
+| `push-avp-rand-zero.click` | `RANDNUMSTRING 0` is unused, not a second source: `RANDHEXSTRING 4` supplies four hex characters at AVP Length 12 (A-10) |
+| `push-avp-duplicate-octetstring.click` | a repeated `OCTETSTRING` is Click's last-wins, not a second source: the value is `bc` at AVP Length 10 (A-10) |
 | `push-avp-rand.click` | generated value, 8 characters |
 | `rand-alphanum-one.click` | `RANDALPHANUMSTRING 1` emits one character: AVP Length 9 and three zero pad octets (F-8) |
 | `rand-hex-one.click` | `RANDHEXSTRING 1` emits one character rather than an empty AVP (F-8) |

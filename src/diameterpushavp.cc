@@ -86,13 +86,17 @@ int DiameterPushAVP::configure(Vector<String> &conf, ErrorHandler *errh)
 	// Whether UINT32 was supplied, which its value cannot say: an absent
 	// argument and an explicit UINT32 0 both leave datauint at zero.
 	bool uintSpecified = false;
+	// Likewise whether OCTETSTRING was supplied: an absent argument and an
+	// explicit OCTETSTRING "" both leave datastring empty, and the empty string
+	// is the documented no-value request rather than an absence.
+	bool octetSpecified = false;
 
 	if (Args(conf, this, errh)
 		.read_m("CODE", code)
 		.read("VENDORSPEC", vendorSpec)
 		.read("VENDOR", vendorId)
 		.read("MANDATORY", mandatory)
-		.read("OCTETSTRING", datastring)
+		.read("OCTETSTRING", datastring).read_status(octetSpecified)
 		.read("UINT32", datauint).read_status(uintSpecified)
 		.read("RANDUINT32", randUInt32)
 		.read("RANDALPHANUMSTRING", randAlphaNumString)
@@ -101,6 +105,42 @@ int DiameterPushAVP::configure(Vector<String> &conf, ErrorHandler *errh)
 		.read("RANDHEXSTRING", randHexString)
 		.complete() < 0)
 		return -1;
+
+	// At most one value source may supply the value: two of them used to resolve
+	// by if/else order, so one was silently discarded and the caller got an AVP
+	// of the wrong value type. Presence differs per argument because the parsed
+	// value cannot express it: OCTETSTRING counts when the keyword is present
+	// (an empty string is the documented no-value request) and UINT32 when
+	// present (zero is four octets), RANDUINT32 only when true, and a RAND*STRING
+	// generator only when its count is above zero, the documented "unused" value.
+	// The walk follows the documented argument order, so a configuration with
+	// three sources names a deterministic pair.
+	const struct {
+		const char *name;
+		bool supplied;
+	} valueSources[] = {
+		{ "OCTETSTRING", octetSpecified },
+		{ "UINT32", uintSpecified },
+		{ "RANDUINT32", randUInt32 },
+		{ "RANDALPHANUMSTRING", randAlphaNumString > 0 },
+		{ "RANDNUMSTRING", randNumString > 0 },
+		{ "RANDALPHASTRING", randAlphaString > 0 },
+		{ "RANDHEXSTRING", randHexString > 0 }
+	};
+	const char *firstSource = 0;
+	for (size_t i = 0; i < sizeof(valueSources) / sizeof(valueSources[0]); ++i)
+	{
+		if (!valueSources[i].supplied)
+		{
+			continue;
+		}
+		if (firstSource)
+		{
+			return errh->error("the %s and %s arguments cannot be used together: at most one value source may be supplied",
+					firstSource, valueSources[i].name);
+		}
+		firstSource = valueSources[i].name;
+	}
 
 	// Presence decides the value length, not magnitude: both sources supply a
 	// 4-octet number, and zero is a legal value of each. RFC 6733 section 4.2
@@ -145,6 +185,8 @@ Packet* DiameterPushAVP::simple_action(Packet * p_in)
 	String valueString = datastring;
 	AvpHeader header = ah;
 
+	// configure() admits at most one value source, so at most one branch applies;
+	// a new value argument must be added to the presence table in configure().
 	if(randUInt32 == true)
 	{
 		valueUint = click_random();
