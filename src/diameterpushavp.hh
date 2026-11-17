@@ -43,9 +43,16 @@ first of RANDALPHANUMSTRING, RANDNUMSTRING, RANDALPHASTRING and RANDHEXSTRING
 whose count is above zero generates it; otherwise a non-empty OCTETSTRING is
 used. A non-empty OCTETSTRING wins even over RANDUINT32, because the string is
 never cleared. When no string is available the value is a 4-octet big-endian
-number -- the RANDUINT32 draw when RANDUINT32 is set, UINT32 otherwise -- and a
-zero number leaves the AVP without a value. An AVP with no value is 8 octets
-long (12 with the vendor header).
+number -- the RANDUINT32 draw when RANDUINT32 is set, UINT32 otherwise. A zero
+number is still a 4-octet value, so the AVP Length is 12 (16 with the vendor
+header), as RFC 6733 section 4.2 requires for Unsigned32.
+
+An AVP with no value is 8 octets long (12 with the vendor header), which is the
+empty-OctetString case section 4.2 permits: an empty OCTETSTRING, or no string
+source and no numeric source at all. This element has no dictionary, so it
+cannot tell an OctetString AVP from an Unsigned32 one; an AVP whose application
+specification makes it Unsigned32 or Integer32 needs UINT32 or RANDUINT32,
+because a value-less one does not have the length section 4.2 requires.
 
 Keyword arguments are:
 
@@ -76,19 +83,21 @@ nor the message Length. Default is false.
 =item OCTETSTRING
 
 String. The value as literal octets, used when no RAND*STRING generator
-supplies one.
+supplies one. An empty string appends an AVP with no value: Length 8, or 12
+with the vendor header.
 
 =item UINT32
 
 Integer. The value as a 4-octet big-endian number. Used only when no string is
-available and RANDUINT32 is false; a value of 0 leaves the AVP without a
-value.
+available and RANDUINT32 is false. A value of 0 is four zero octets, so the AVP
+Length is 12 (16 with the vendor header), per RFC 6733 section 4.2.
 
 =item RANDUINT32
 
 Boolean. If true, a random 4-octet number drawn from click_random() is the
-value when no string is set, and the string generators do not run. Default is
-false.
+value when no string is set, and the string generators do not run. Every draw
+is four octets, including a draw of zero: the AVP Length is 12 (16 with the
+vendor header), per RFC 6733 section 4.2. Default is false.
 
 =item RANDALPHANUMSTRING
 
@@ -133,6 +142,9 @@ private:
 	AvpHeader ah;
 	String datastring;
 	uint32_t datauint;
+	// Whether a numeric source was supplied (UINT32 present, or RANDUINT32
+	// true). Presence, not magnitude: a supplied or drawn zero is four octets.
+	bool hasUint;
 	bool randUInt32;
 	size_t randAlphaNumString;
 	size_t randNumString;

@@ -68,7 +68,7 @@ static String randString(randStringType type, size_t size)
 }
 
 DiameterPushAVP::DiameterPushAVP()
-: datastring(), datauint(0), randUInt32(false), randAlphaNumString(0), randNumString(0), randAlphaString(0), randHexString(0) {}
+: datastring(), datauint(0), hasUint(false), randUInt32(false), randAlphaNumString(0), randNumString(0), randAlphaString(0), randHexString(0) {}
 
 int DiameterPushAVP::configure(Vector<String> &conf, ErrorHandler *errh)
 {
@@ -83,6 +83,9 @@ int DiameterPushAVP::configure(Vector<String> &conf, ErrorHandler *errh)
 	// The M bit defaults to clear, so an absent MANDATORY keeps the AVP bytes
 	// exactly as they were before the argument existed.
 	bool mandatory = false;
+	// Whether UINT32 was supplied, which its value cannot say: an absent
+	// argument and an explicit UINT32 0 both leave datauint at zero.
+	bool uintSpecified = false;
 
 	if (Args(conf, this, errh)
 		.read_m("CODE", code)
@@ -90,7 +93,7 @@ int DiameterPushAVP::configure(Vector<String> &conf, ErrorHandler *errh)
 		.read("VENDOR", vendorId)
 		.read("MANDATORY", mandatory)
 		.read("OCTETSTRING", datastring)
-		.read("UINT32", datauint)
+		.read("UINT32", datauint).read_status(uintSpecified)
 		.read("RANDUINT32", randUInt32)
 		.read("RANDALPHANUMSTRING", randAlphaNumString)
 		.read("RANDNUMSTRING", randNumString)
@@ -98,6 +101,11 @@ int DiameterPushAVP::configure(Vector<String> &conf, ErrorHandler *errh)
 		.read("RANDHEXSTRING", randHexString)
 		.complete() < 0)
 		return -1;
+
+	// Presence decides the value length, not magnitude: both sources supply a
+	// 4-octet number, and zero is a legal value of each. RFC 6733 section 4.2
+	// fixes Unsigned32 at AVP Length 12 (16 with the vendor header).
+	hasUint = uintSpecified || randUInt32;
 
 	// RFC 6733 section 4.1.1 forbids Vendor-Id zero with the V bit set, so an
 	// absent VENDOR and an explicit VENDOR 0 are the same refusal.
@@ -162,7 +170,7 @@ Packet* DiameterPushAVP::simple_action(Packet * p_in)
 	// so the message ends exactly where the packet ends.
 	const uint32_t messageLength = p_in->length();
 	uint32_t avpHeaderLength = header.getHeaderLength();
-	uint32_t avpDataLength = valueString.length() > 0 ? valueString.length() : (valueUint > 0 ? 4 : 0);
+	uint32_t avpDataLength = valueString.length() > 0 ? valueString.length() : (hasUint ? 4 : 0);
 	uint32_t avpLength = avpHeaderLength + avpDataLength;
 	uint32_t avpLengthPadded = ((avpLength + 3) / 4) * 4;
 	WritablePacket *p = p_in->put(avpLengthPadded);
