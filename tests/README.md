@@ -20,10 +20,14 @@ CLICK=~/click/bin/click bats --tap --filter pop-avp tests   # one config
 bats --tap tests/identity.bats                # source checks, no Click needed
 ```
 
-`smoke.bats` runs every config under `configs/` with a 10 s timeout, then
+`smoke.bats` runs every config under `configs/` with a 30 s timeout, then
 asserts the bytes the config printed: label, packet length and hex contents. A
 wrong length field, a changed flag or an off-by-one is a failed test, not a
-silent pass. A config that sets no seed varies its `hbh`/`e2e` identifiers per
+silent pass. The bound covers CPU-bound simulated-time runs rather than wall
+clock: `identifiers-rated-source-pull-unique` spins through refused pulls for
+one simulated 0.3 s span and measured 12.2 s at 3.19 GHz, so a 10 s bound killed
+a correct run on CI. Override it with `CLICK_TIMEOUT`. A config that sets no
+seed varies its `hbh`/`e2e` identifiers per
 run, so the test matches them with a regex instead of pinning them, and the
 `encap` test runs its config a second time to check that every other field comes
 back byte for byte.
