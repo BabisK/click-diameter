@@ -1,0 +1,73 @@
+name: Build and install Click
+description: >-
+  Restore a cached Click prefix for a commit, build and install it when the
+  cache misses, then save it. The prefix name, cache key and compiler flags are
+  inputs because the ThreadSanitizer job runs the same recipe with
+  instrumentation compiled in.
+
+inputs:
+  sha:
+    description: Click commit to build
+    required: true
+  name:
+    description: Prefix directory under the runner's home, such as click or click-tsan
+    required: true
+  cache-key:
+    description: Cache key for the prefix
+    required: true
+  cxxflags:
+    description: CXXFLAGS for the Click build; empty for the default build
+    required: false
+    default: ''
+  ldflags:
+    description: LDFLAGS for the Click build; empty for the default build
+    required: false
+    default: ''
+
+outputs:
+  cache-hit:
+    description: Whether the prefix came from the cache instead of a build
+    value: ${{ steps.cache.outputs.cache-hit }}
+
+runs:
+  using: composite
+  steps:
+    - name: Restore the Click install
+      id: cache
+      uses: actions/cache/restore@v6
+      with:
+        path: ~/${{ inputs.name }}
+        key: ${{ inputs.cache-key }}
+
+    - name: Build and install Click
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        CLICK_SHA: ${{ inputs.sha }}
+        CLICK_PREFIX_NAME: ${{ inputs.name }}
+        CXXFLAGS: ${{ inputs.cxxflags }}
+        LDFLAGS: ${{ inputs.ldflags }}
+      run: |
+        prefix="$HOME/$CLICK_PREFIX_NAME"
+        git init "$RUNNER_TEMP/click"
+        git -C "$RUNNER_TEMP/click" fetch --depth 1 \
+          https://github.com/kohler/click.git "$CLICK_SHA"
+        git -C "$RUNNER_TEMP/click" checkout --detach FETCH_HEAD
+        cd "$RUNNER_TEMP/click"
+        # --enable-user-multithread is what makes the three smp-* configs
+        # exercise two router threads instead of skipping: a plain userlevel
+        # build prints a warning and runs everything on one thread, so the
+        # concurrency tests would silently become shape checks.
+        ./configure --prefix="$prefix" --enable-userlevel --disable-linuxmodule \
+          --enable-user-multithread
+        make -j"$(nproc)"
+        make install
+
+    # Saved here, not by the restore action's post step, so a run whose package
+    # build or tests fail still keeps its Click install for the next attempt.
+    - name: Save the Click install
+      if: steps.cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ~/${{ inputs.name }}
+        key: ${{ inputs.cache-key }}

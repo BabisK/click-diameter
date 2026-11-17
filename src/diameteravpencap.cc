@@ -42,20 +42,25 @@ int DiameterAvpEncap::configure(Vector<String> &conf, ErrorHandler *errh)
 
 Packet* DiameterAvpEncap::simple_action(Packet * p_in)
 {
+	// Click does not serialise a push element across router threads, so the
+	// configured header is copied per packet: the Length and the header it is
+	// encoded into always belong to the same packet.
+	AvpHeader header = ah;
+
 	// RFC 6733 section 4.1: the AVP Length counts the header and the value but
 	// not the zero octets that pad the AVP up to a 4-octet boundary.
 	const uint32_t valueLength = p_in->length();
-	ah.setLength(ah.getHeaderLength() + valueLength);
-	const uint32_t paddingLength = ah.getLengthPadded() - ah.getLength();
+	const uint32_t headerLength = header.getHeaderLength();
+	header.setLength(headerLength + valueLength);
+	const uint32_t paddingLength = header.getLengthPadded() - header.getLength();
 
-	WritablePacket* wp = p_in->push(ah.getHeaderLength());
+	WritablePacket* wp = p_in->push(headerLength);
 	if (paddingLength > 0)
 	{
 		wp = wp->put(paddingLength);
-		memset(wp->data() + ah.getHeaderLength() + valueLength, 0,
-				paddingLength);
+		memset(wp->data() + headerLength + valueLength, 0, paddingLength);
 	}
-	ah.encode(wp->data());
+	header.encode(wp->data());
 
 	return wp;
 }

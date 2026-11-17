@@ -25,19 +25,18 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
-    name: Build and test the package
+  # Both jobs build Click from the same commit, so the commit is resolved once
+  # here instead of twice, and a network problem fails this job once rather
+  # than in each of them.
+  resolve-click:
+    name: Resolve the Click master commit
     runs-on: ubuntu-26.04
-    timeout-minutes: 30
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
     steps:
-      - name: Check out the repository
-        uses: actions/checkout@v7
-
-      # The package is installed into the same prefix as Click, so
-      # `require(diameter)` resolves. Resolving Click's commit first lets the
-      # cache key follow upstream: new commit, new key, Click rebuilt.
-      - name: Resolve the Click master commit
-        id: click
+      - name: Resolve Click master to a commit
+        id: resolve
         run: |
           for attempt in 1 2 3; do
             sha=$(git ls-remote https://github.com/kohler/click.git \
@@ -54,14 +53,14 @@ jobs:
           echo "could not resolve Click master after 3 attempts" >&2
           exit 1
 
-      # Bump the `v1` in both cache keys below whenever the Click configure
-      # invocation, or anything else that shapes the cached prefix, changes.
-      - name: Restore the Click install
-        id: click-cache
-        uses: actions/cache/restore@v6
-        with:
-          path: ~/click
-          key: click-${{ runner.os }}-v1-${{ steps.click.outputs.sha }}
+  build-and-test:
+    name: Build and test the package
+    needs: resolve-click
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
 
       - name: Install build dependencies
         id: deps
@@ -69,29 +68,17 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y build-essential autoconf libpcap-dev bats
 
+      # The package is installed into the same prefix as Click, so
+      # `require(diameter)` resolves. Bump the `v2` in this key whenever the
+      # Click configure invocation, or anything else that shapes the prefix,
+      # changes.
       - name: Build and install Click
         id: click-build
-        if: steps.click-cache.outputs.cache-hit != 'true'
-        env:
-          CLICK_SHA: ${{ steps.click.outputs.sha }}
-        run: |
-          git init "$RUNNER_TEMP/click"
-          git -C "$RUNNER_TEMP/click" fetch --depth 1 \
-            https://github.com/kohler/click.git "$CLICK_SHA"
-          git -C "$RUNNER_TEMP/click" checkout --detach FETCH_HEAD
-          cd "$RUNNER_TEMP/click"
-          ./configure --prefix="$HOME/click" --enable-userlevel --disable-linuxmodule
-          make -j"$(nproc)"
-          make install
-
-      # Saved here, not by the restore action's post step, so a PR whose package
-      # build or tests fail still keeps its Click build for the next run.
-      - name: Save the Click install
-        if: steps.click-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
+        uses: ./.github/actions/build-click
         with:
-          path: ~/click
-          key: click-${{ runner.os }}-v1-${{ steps.click.outputs.sha }}
+          sha: ${{ needs.resolve-click.outputs.sha }}
+          name: click
+          cache-key: click-${{ runner.os }}-v2-${{ needs.resolve-click.outputs.sha }}
 
       - name: Build and install the package
         id: package
@@ -113,16 +100,15 @@ jobs:
       - name: Diagnose the failure
         if: failure()
         env:
-          CLICK_SHA: ${{ steps.click.outputs.sha }}
-          CLICK_CACHE_HIT: ${{ steps.click-cache.outputs.cache-hit }}
-          RESOLVE_OUTCOME: ${{ steps.click.outcome }}
+          CLICK_SHA: ${{ needs.resolve-click.outputs.sha }}
+          CLICK_CACHE_HIT: ${{ steps.click-build.outputs.cache-hit }}
           DEPS_OUTCOME: ${{ steps.deps.outcome }}
           CLICK_BUILD_OUTCOME: ${{ steps.click-build.outcome }}
           PACKAGE_OUTCOME: ${{ steps.package.outcome }}
           TESTS_OUTCOME: ${{ steps.tests.outcome }}
         run: |
           failed=""
-          for stage in "resolve:$RESOLVE_OUTCOME" "dependencies:$DEPS_OUTCOME" \
+          for stage in "dependencies:$DEPS_OUTCOME" \
             "click-build:$CLICK_BUILD_OUTCOME" "package:$PACKAGE_OUTCOME" \
             "tests:$TESTS_OUTCOME"; do
             name=${stage%%:*}
@@ -165,3 +151,50 @@ jobs:
             echo "| Click binary | \`$click_version\` |"
             echo "| Toolchain | \`$(version_of gcc)\` / \`$(version_of autoconf)\` / \`$(version_of make)\` |"
           } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # The frame-level smp-* tests can see a Length that disagrees with its frame,
+  # but not a shared String or header field being written by two threads: the
+  # appended AVP Length comes from configuration, so every frame looks right
+  # whichever thread wins. ThreadSanitizer is the only check that sees that. It
+  # needs Click itself built with the sanitizer — Click loads packages with
+  # dlopen, and a module linking libtsan cannot start in an uninstrumented
+  # process — so this job runs the same build recipe with the flags set and its
+  # own prefix and cache key. The verdict comes from tests/tsan-check.sh, not
+  # from TSan's exit status: Click races its own shutdown bookkeeping, so the
+  # sanitizer exits non-zero on a clean package.
+  thread-sanitizer:
+    name: ThreadSanitizer over the two-thread configs
+    needs: resolve-click
+    runs-on: ubuntu-26.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf libpcap-dev
+
+      - name: Build and install Click with ThreadSanitizer
+        uses: ./.github/actions/build-click
+        with:
+          sha: ${{ needs.resolve-click.outputs.sha }}
+          name: click-tsan
+          cache-key: click-tsan-${{ runner.os }}-v1-${{ needs.resolve-click.outputs.sha }}
+          cxxflags: -fsanitize=thread -g -O1
+          ldflags: -fsanitize=thread
+
+      # The package needs the sanitizer flags as well, and the -fPIC -shared
+      # part is load-bearing: overriding CXXFLAGS without them fails to link.
+      - name: Build and install the package with ThreadSanitizer
+        env:
+          TSAN_PACKAGE_FLAGS: -fsanitize=thread -g -O1 -Wall -Wextra -fPIC -shared
+        run: |
+          autoconf
+          ./configure --with-click="$HOME/click-tsan" --prefix="$HOME/click-tsan"
+          make -j"$(nproc)" CXXFLAGS="$TSAN_PACKAGE_FLAGS"
+          make install CXXFLAGS="$TSAN_PACKAGE_FLAGS"
+
+      - name: Run the two-thread configs under ThreadSanitizer
+        run: tests/tsan-check.sh "$HOME/click-tsan/bin/click" tests/configs/smp-*.click

@@ -118,32 +118,39 @@ Packet* DiameterPushAVP::simple_action(Packet * p_in)
 		return 0;
 	}
 
+	// Click does not serialise a push element across router threads, so the
+	// configured value and header are copied per packet: every write below
+	// goes to a local, and the members are only read.
+	uint32_t valueUint = datauint;
+	String valueString = datastring;
+	AvpHeader header = ah;
+
 	if(randUInt32 == true)
 	{
-		datauint = click_random();
+		valueUint = click_random();
 	}
 	else if(randAlphaNumString > 0)
 	{
-		datastring = randString(AlphaNum, randAlphaNumString);
+		valueString = randString(AlphaNum, randAlphaNumString);
 	}
 	else if(randNumString > 0)
 	{
-		datastring = randString(Num, randNumString);
+		valueString = randString(Num, randNumString);
 	}
 	else if(randAlphaString > 0)
 	{
-		datastring = randString(Alpha, randAlphaString);
+		valueString = randString(Alpha, randAlphaString);
 	}
 	else if(randHexString > 0)
 	{
-		datastring = randString(Hex, randHexString);
+		valueString = randString(Hex, randHexString);
 	}
 
 	// The guard just proved that the header Length equals the packet length,
 	// so the message ends exactly where the packet ends.
 	const uint32_t messageLength = p_in->length();
-	uint32_t avpHeaderLength = ah.getHeaderLength();
-	uint32_t avpDataLength = datastring.length() > 0 ? datastring.length() : (datauint > 0 ? 4 : 0);
+	uint32_t avpHeaderLength = header.getHeaderLength();
+	uint32_t avpDataLength = valueString.length() > 0 ? valueString.length() : (valueUint > 0 ? 4 : 0);
 	uint32_t avpLength = avpHeaderLength + avpDataLength;
 	uint32_t avpLengthPadded = ((avpLength + 3) / 4) * 4;
 	WritablePacket *p = p_in->put(avpLengthPadded);
@@ -153,19 +160,19 @@ Packet* DiameterPushAVP::simple_action(Packet * p_in)
 
 	memset(p->data() + messageLength, 0, avpLengthPadded);
 
-	ah.setLength(avpLength);
-	ah.encode(p->data() + messageLength);
-	if(datastring.length() > 0)
+	header.setLength(avpLength);
+	header.encode(p->data() + messageLength);
+	if(valueString.length() > 0)
 	{
-		memcpy(p->data() + messageLength + avpHeaderLength, datastring.data(), avpDataLength);
+		memcpy(p->data() + messageLength + avpHeaderLength, valueString.data(), avpDataLength);
 	}
 	else
 	{
-		uint32_t hton = htonl(datauint);
+		uint32_t hton = htonl(valueUint);
 		memcpy(p->data() + messageLength + avpHeaderLength, &hton, avpDataLength);
 	}
 
-	dh.setLength(messageLength + ah.getLengthPadded());
+	dh.setLength(messageLength + header.getLengthPadded());
 	dh.encode(p->data());
 
 	return p;

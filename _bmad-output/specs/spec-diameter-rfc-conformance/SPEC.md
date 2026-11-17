@@ -48,7 +48,7 @@ A pain to solve, with a correctness mandate behind it. The package builds, parse
 - No persistent state and no cross-reboot identifier uniqueness.
 - No redesign of the argument syntax beyond adding `MANDATORY`.
 - No change to anything listed under "Verified-correct behaviour" or "Not defects" in `findings.md`; those are the regression surface.
-- No performance work and no CI pipeline work.
+- No performance work. CI pipeline work is limited to what the thread-safety story needs: building Click with `--enable-user-multithread` so the two-thread configs run (story 10), and a ThreadSanitizer job that gates on `tests/tsan-check.sh` (story 11). No other pipeline change.
 
 ## Success signal
 

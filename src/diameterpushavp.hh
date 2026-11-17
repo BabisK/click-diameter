@@ -116,6 +116,8 @@ public:
 	Packet *simple_action(Packet *);
 
 private:
+	// Configuration only: configure() fills these, and simple_action() reads
+	// them into per-packet locals instead of writing them.
 	AvpHeader ah;
 	String datastring;
 	uint32_t datauint;
