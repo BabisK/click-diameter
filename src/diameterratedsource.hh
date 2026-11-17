@@ -36,13 +36,20 @@ defaulting to 0 and false. When the token bucket runs dry a push element
 schedules itself for the time the next packet becomes available, and a pull
 element returns a null packet instead.
 
+The Command Code field is three octets (RFC 6733 section 3), so CODE must not
+exceed 0xFFFFFF: a larger value fails configuration with an error naming the
+argument rather than being truncated on the wire. The two experimental values
+section 3.1 reserves, 0xFFFFFE and 0xFFFFFF, are in range.
+
 Keyword arguments are:
 
 =over 8
 
 =item CODE
 
-Integer. Required. The Command Code written into every message.
+Integer. Required. The Command Code written into every message. Must not exceed
+0xFFFFFF, the largest value the three-octet field holds (RFC 6733 section 3);
+a larger value fails configuration.
 
 =item REQUEST
 

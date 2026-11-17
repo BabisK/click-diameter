@@ -31,6 +31,15 @@ int DiameterEncap::configure(Vector<String> &conf, ErrorHandler *errh)
 	.complete() < 0)
 	return -1;
 
+	// RFC 6733 section 3 fixes the Command Code at three octets, so a larger
+	// value cannot be encoded: the low three octets of 0x01000118 are 0x000118,
+	// and storing it would silently emit a different message type. A value that
+	// cannot be written is a caller error, so refuse the configuration rather
+	// than truncate it. 0xFFFFFE and 0xFFFFFF are section 3.1's experimental
+	// values and stay in range.
+	if (code > DIAMETER_MAX_24BIT_VALUE)
+		return errh->error("the CODE argument must not exceed 0xFFFFFF: the Command Code field is three octets (RFC 6733 section 3)");
+
 	// RFC 6733 section 3 forbids E in a request and T in an answer, so reject
 	// either pair rather than discard an argument the caller wrote. P is legal
 	// on both: section 6.2 makes an answer mirror the request it answers, and
@@ -58,11 +67,26 @@ Packet* DiameterEncap::simple_action(Packet * p_in)
 	// interleave inside a shared header and stamp one frame with the other
 	// packet's Length.
 	DiameterHeader header = dh;
+
+	// RFC 6733 section 3: the Message Length covers the header and the padded
+	// AVPs, so it is always a multiple of 4. A payload that is not on the
+	// boundary is zero-padded, and the pad octets are part of the message:
+	// (payloadLength + 3) & ~3u is the message-level twin of
+	// AvpHeader::getLengthPadded().
+	const uint32_t payloadLength = p_in->length();
+	const uint32_t paddedLength = (payloadLength + 3) & ~3u;
+	const uint32_t paddingLength = paddedLength - payloadLength;
 	header.setHbh(click_random());
 	header.setE2e(click_random());
-	header.setLength(DIAMETER_MESSAGE_HEADER_LENGTH + p_in->length());
+	header.setLength(DIAMETER_MESSAGE_HEADER_LENGTH + paddedLength);
 
 	WritablePacket* wp = p_in->push(DIAMETER_MESSAGE_HEADER_LENGTH);
+	if (paddingLength > 0)
+	{
+		wp = wp->put(paddingLength);
+		memset(wp->data() + DIAMETER_MESSAGE_HEADER_LENGTH + payloadLength,
+				0, paddingLength);
+	}
 	header.encode(wp->data());
 
 	return wp;

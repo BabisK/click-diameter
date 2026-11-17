@@ -27,3 +27,27 @@ source_spec: `4-encode-uint32-0-as-a-four-octet-value.md`
 severity: low
 reason: The draw is click_random(), which on this driver is glibc's random() over [0, 2^31-1], and no Click test element can force a chosen draw: RandomSeed(SEED n) only calls click_srandom(n), and nothing in the package or in Click exposes the drawn value. The only RANDUINT32 config (tests/configs/randomness-push-avp-uint32.click) asserts two 32-octet frames, which every non-zero draw already satisfies, so a regression that keeps magnitude for the random source (hasUint = uintSpecified, length (hasUint || valueUint > 0) ? 4 : 0) leaves the suite green. The delivered code is correct -- hasUint is true whenever RANDUINT32 is set -- so what is missing is the observation, not the behaviour. What would settle it: a Click element or handler that sets the next click_random() value, or a committed seed whose draw is zero on the RNG in use. A seed search over the whole 32-bit space averages a couple of hits but pins glibc's generator rather than this package's rule, and a sweep started for this story
 status: open
+
+### DW-4: Two other writers of the three-octet message Length still truncate it: DiameterEncap stamps Length 20 + payload with no ceiling, and DiameterPopStorePushAVP adds an AVP's padded length with no
+origin: spec-deferred 9ab7e2be3759
+location: src/diameterencap.cc:63, src/diameterpopstorepushavp.cc:85
+source_spec: `8-reject-out-of-range-command-code-and-length.md`
+severity: medium
+reason: Measured against the installed package: a 16,777,200-octet payload into DiameterEncap produced a 16,777,220-octet frame declaring Length 0x000004, and two maximal DiameterPushAVP messages through DiameterPopStorePushAVP produced a 33,554,404-octet frame declaring Length 16,777,188. Both are pre-existing at d1db4ab, and the resolved intent names DiameterPushAVP for the Length half, so this story does not fix them. Closing them needs a run-time drop in each element, a config per element, and the same documentation sentence the PushAVP page now carries.
+status: open
+
+### DW-5: DiameterAvpEncap truncates the three-octet AVP Length (RFC 6733 section 4.1) for a value above 0xFFFFFF - 12.
+origin: spec-deferred 111aba44fbf1
+location: src/diameteravpencap.cc:54
+source_spec: `8-reject-out-of-range-command-code-and-length.md`
+severity: medium
+reason: header.setLength(headerLength + valueLength) at src/diameteravpencap.cc:54 is unguarded; a 16,777,210-octet payload emits an envelope whose Length field reads 000002. Pre-existing and a different field from the message Length this story guards, so it is deferred rather than patched. Closing it needs a run-time drop and a boundary config, following the PushAVP pattern.
+status: open
+
+### DW-6: A RAND*STRING count is unbounded and the value is materialised before the ceiling guard decides to drop, so an always-overflowing config pays its allocation and random draws on every packet.
+origin: spec-deferred c139f2b06eb4
+location: src/diameterpushavp.cc:190-233
+source_spec: `8-reject-out-of-range-command-code-and-length.md`
+severity: low
+reason: randString() at src/diameterpushavp.cc:190-208 builds the whole value, then the guard at :228 drops it; a count of 20,000,000 burns roughly 0.4 s and 39 MB per packet, and a larger count fails to allocate. This is a pre-existing argument hazard: at d1db4ab the same count also allocated the value, then emitted a frame with a wrapped Length. The SPEC excludes performance work, and a configure-time cap would add argument surface the intent did not ask for. What would settle it: a configure-time rejection of counts that cannot fit even a 20-octet message, documented in the four RAND*STRING items.
+status: open

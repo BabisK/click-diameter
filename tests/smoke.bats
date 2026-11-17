@@ -29,20 +29,31 @@
 # randomness-* and malformed-* configs never cover the AVP header). The
 # avp-padding* and avp-decap-* tests pin the 4-octet AVP alignment of RFC 6733
 # section 4.1 and the rule that the decoder derives padding from Length alone.
-# The malformed-* tests assert the drop path instead: exit 0, one warning naming
-# the element and reason, and no Print line. They cover a bad Version, a short
-# packet, a Length mismatch, an over-long or malformed AVP, a V bit with a zero
-# Vendor-Id, and an illegal flag.
-# The ten configs the package refuses -- ERROR on a request and RETRANSMITED on
-# an answer in DiameterEncap, VENDORSPEC true without a non-zero VENDOR in
-# DiameterPushAVP, and two value sources in one DiameterPushAVP -- assert the
+# The encap-padding* tests pin the message-level twin from section 3:
+# DiameterEncap zero-pads the payload to a 4-octet boundary and counts the pad in
+# the Message Length, and DiameterDecap forwards the pad with the payload. The
+# malformed-* tests assert the drop path instead: exit 0, one warning naming the
+# element and reason, and no Print line. They cover a bad Version, a short
+# packet, an unaligned or mismatched Length, an over-long or malformed AVP, a V
+# bit with a zero Vendor-Id, and an illegal flag. The not-aligned configs pin the
+# reason precedence: the Version outranks the alignment, the short-header guard
+# outranks it, and it outranks the Length mismatch.
+# The fourteen configs the package refuses -- ERROR on a request and
+# RETRANSMITED on an answer in DiameterEncap, VENDORSPEC true without a non-zero
+# VENDOR in DiameterPushAVP, two value sources in one DiameterPushAVP, and a
+# CODE above the three-octet Command Code field in either writer -- assert the
 # configure path: Click's whole configure-failure output and no Print line.
 # push-avp-conflict-three pins that the error names the first conflicting pair
 # in documented argument order rather than a later pair. push-avp-rand-zero and
 # push-avp-randuint32-false pin the other side of the one-source rule: a zero
 # generator count and a false RANDUINT32 are not sources, so each configures and
 # prints a frame, and push-avp-duplicate-octetstring pins that a repeated
-# keyword is Click's last-wins rather than a second source. The smp-* tests are
+# keyword is Click's last-wins rather than a second source. The two code-max
+# configs pin the inclusive Command Code ceiling: 16777215 (0xFFFFFF) is in
+# range and prints ffffff, so an off-by-one guard fails there. The push-avp
+# length pair pins the three-octet Message Length ceiling from both sides: an
+# append one 4-octet step past it is dropped with its own warning, while the
+# largest legal message still appends. The smp-* tests are
 # the ones run under `click -j 2`, with StaticThreadSched putting two producers
 # on two router threads: the Encap and AvpEncap frames derive their Length from
 # the packet, so a cross-thread write leaves the declared Length disagreeing
@@ -345,6 +356,33 @@ expect_seeded() {
 	# not two: the conflict check must not count a keyword twice. The value is
 	# 2 octets, so AVP Length 10 and two zero pad octets.
 	expect 'push-avp-duplicate-octetstring:   32 | 01000020 80000118 00000000 00000001 00000002 00000108 0000000a 62630000'
+}
+
+@test "push-avp-length-overflow: an append past 0xFFFFFF is dropped, not wrapped" {
+	run_click push-avp-length-overflow.click
+	# A-9: 20 + 8 + 16,777,188 = 16,777,216 octets, one past the three-octet
+	# Length field, used to wrap Length to 0x000000 and emit the frame. The
+	# guard runs before put(), so the drop is exactly one line and Click's Put
+	# advisory cannot appear beside it.
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	expect 'DiameterPushAVP: dropping packet: appending the AVP would exceed the three-octet Length field (RFC 6733 section 3)'
+}
+
+@test "push-avp-length-max: the largest legal message still appends" {
+	run_click push-avp-length-max.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# One 4-octet step below the overflow config: 16,777,212 octets (0xFFFFFC)
+	# is the largest multiple of 4 at or below the ceiling, so the AVP is
+	# appended and the header carries Length 0xfffffc. Print shows the first 36
+	# octets -- the message header, the appended AVP header (Code 0x00000108,
+	# Length 0xFFFFE8) and the first 8 value octets, 16 hex digits in two
+	# 8-digit groups -- and the 16 MB append makes Click print one advisory.
+	local printed others
+	printed=$(grep '^push-avp-length-max:' <<<"$output")
+	others=$(grep -v '^push-avp-length-max:' <<<"$output" | grep -v '^expensive Packet::put' || true)
+	[ -z "$others" ] || { echo "unexpected output beside the Print line: $others"; return 1; }
+	local header='^push-avp-length-max: +16777212 \| 01fffffc 80000118 00000000 00000001 00000002 00000108 00ffffe8 (3[0-9]|4[1-6]){4} (3[0-9]|4[1-6]){4}$'
+	[[ "$printed" =~ $header ]] || { echo "expected: 16,777,212 octets, Length 0xfffffc, AVP Length 0xffffe8 and 16 generated hex digits"; return 1; }
 }
 
 @test "rand-alphanum-one: one generated character, AVP Length 9" {
@@ -676,6 +714,36 @@ pop: +20 \| 01000014 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8}$'
 	[[ "$output" =~ $expected ]] || { echo "expected: 20 octets, version 1, Length 20, no payload"; return 1; }
 }
 
+@test "encap-padding: a 5-octet payload is padded to 28 octets with three zero octets" {
+	run_click encap-padding.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# A-4: RFC 6733 section 3 makes the Message Length a multiple of 4, so the
+	# 5-octet payload gains three zero pad octets and Length 0x1c. Decap accepts
+	# the frame and forwards the pad with the payload: 8 octets, no drop line.
+	local expected='^encap: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} deadbeef 00000000
+decap: +8 \| deadbeef 00000000$'
+	[[ "$output" =~ $expected ]] || { echo "expected: a 28-octet frame with Length 0x1c, then its 8 forwarded octets"; return 1; }
+}
+
+@test "encap-padding-two: a 6-octet payload gets two zero pad octets" {
+	run_click encap-padding-two.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# The same 28-octet frame and Length 0x1c, with the two pad octets after the
+	# six payload octets. A formula that only handled the three-octet residue
+	# fails here.
+	local expected='^encap-padding-two: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} deadbeef 00110000$'
+	[[ "$output" =~ $expected ]] || { echo "expected: 28 octets, Length 0x1c, deadbeef 00110000"; return 1; }
+}
+
+@test "encap-padding-one: a 7-octet payload gets one zero pad octet" {
+	run_click encap-padding-one.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# The one-octet residue: 28 octets, Length 0x1c, one zero octet after the
+	# seven payload octets.
+	local expected='^encap-padding-one: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} deadbeef 00112200$'
+	[[ "$output" =~ $expected ]] || { echo "expected: 28 octets, Length 0x1c, deadbeef 00112200"; return 1; }
+}
+
 @test "encap-decap: the encapsulated payload survives Decap without a drop" {
 	run_click encap-decap.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
@@ -725,6 +793,31 @@ pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
 	expect_configure_failure encap-error-on-request.click DiameterEncap 'the ERROR argument cannot be set on a request (RFC 6733 section 3)'
 }
 
+@test "encap-code-too-large: CODE above 0xFFFFFF fails to configure" {
+	run_click encap-code-too-large.click
+	# A-9: the Command Code is three octets (RFC 6733 section 3), so 0x01000118
+	# cannot be encoded and used to be truncated to 0x000118 without a warning.
+	expect_configure_failure encap-code-too-large.click DiameterEncap 'the CODE argument must not exceed 0xFFFFFF: the Command Code field is three octets (RFC 6733 section 3)'
+}
+
+@test "encap-code-first-too-large: the first illegal CODE fails to configure" {
+	run_click encap-code-first-too-large.click
+	# 16777216 is 0x1000000, the smallest value that does not fit three octets.
+	# A guard that is lenient by up to the 0x01000118 repro value passes every
+	# test without this one.
+	expect_configure_failure encap-code-first-too-large.click DiameterEncap 'the CODE argument must not exceed 0xFFFFFF: the Command Code field is three octets (RFC 6733 section 3)'
+}
+
+@test "encap-code-max: CODE 0xFFFFFF is in range and prints ffffff" {
+	run_click encap-code-max.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# The ceiling is inclusive, and RFC 6733 section 3.1 reserves 0xFFFFFF for
+	# experimental use rather than forbidding it. A guard written as >= rejects
+	# this config instead of printing the 24-octet frame.
+	local expected='^encap-code-max: +24 \| 01000018 80ffffff 00000000 [0-9a-f]{8} [0-9a-f]{8} deadbeef$'
+	[[ "$output" =~ $expected ]] || { echo "expected: 24 octets, code ffffff, then the payload"; return 1; }
+}
+
 @test "encap-proxiable-on-answer: P is legal on either type, flags 40" {
 	run_click encap-proxiable-on-answer.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
@@ -752,6 +845,29 @@ pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
 	local expected='^rated-source-answer: +20 \| 01000014 00000118 0000002a [0-9a-f]{8} [0-9a-f]{8}$'
 	[[ "$output" =~ $expected ]] || { echo "expected: 20 octets, version 1, Length 20, flags 00, code 000118, App-Id 0000002a"; return 1; }
+}
+
+@test "rated-source-code-too-large: CODE above 0xFFFFFF fails to configure" {
+	run_click rated-source-code-too-large.click
+	# A-9's second writer: DiameterRatedSource shares DiameterHeader::setCode(),
+	# so it must refuse the same value with the same error.
+	expect_configure_failure rated-source-code-too-large.click DiameterRatedSource 'the CODE argument must not exceed 0xFFFFFF: the Command Code field is three octets (RFC 6733 section 3)'
+}
+
+@test "rated-source-code-first-too-large: the first illegal CODE fails to configure" {
+	run_click rated-source-code-first-too-large.click
+	# 0x1000000 must fail in the second writer too, so a lenient guard cannot
+	# hide behind the larger repro value in either configure path.
+	expect_configure_failure rated-source-code-first-too-large.click DiameterRatedSource 'the CODE argument must not exceed 0xFFFFFF: the Command Code field is three octets (RFC 6733 section 3)'
+}
+
+@test "rated-source-code-max: CODE 0xFFFFFF prints ffffff in a 20-octet message" {
+	run_click rated-source-code-max.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# The inclusive ceiling in the second writer: Length still 20 and the code
+	# ffffff, so the guard must be > rather than >=.
+	local expected='^rated-source-code-max: +20 \| 01000014 80ffffff 0000002a [0-9a-f]{8} [0-9a-f]{8}$'
+	[[ "$output" =~ $expected ]] || { echo "expected: 20 octets, Length 20, flags 80, code ffffff"; return 1; }
 }
 
 @test "randomness-encap: RandomSeed reproduces the identifiers across runs" {
@@ -911,14 +1027,57 @@ pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
 	expect_drop DiameterPushAVP 'header Length does not match packet length'
 }
 
-@test "malformed-avp-padding-overhang: padded AVP past the message dropped by DiameterPopAVP" {
+@test "malformed-avp-padding-overhang: an unaligned Length outranks the padded AVP bound" {
 	run_click malformed-avp-padding-overhang.click
-	expect_drop DiameterPopAVP 'AVP extends past the message end'
+	# A-4: the 30-octet frame declares 30, which is not a multiple of 4, so the
+	# header's alignment rule drops it before the AVP walk. The padded-bound
+	# guard that the frame was built for is now unreachable defence in depth.
+	expect_drop DiameterPopAVP 'the Length field is not a multiple of 4'
 }
 
 @test "malformed-avp-trailing-octets: partial trailing AVP header dropped by DiameterPopAVP" {
 	run_click malformed-avp-trailing-octets.click
+	# A-4: the frame is 32 octets with four trailing octets, so its aligned
+	# Length passes the header rule and the walk still reaches the partial
+	# second header, which is the branch this config pins.
 	expect_drop DiameterPopAVP 'packet shorter than the 8-octet AVP header'
+}
+
+@test "malformed-length-not-aligned: an unaligned Length dropped by DiameterDecap" {
+	run_click malformed-length-not-aligned.click
+	# A-4: the 25-octet frame is exactly what the pre-change DiameterEncap
+	# emitted for a 5-octet payload. RFC 6733 section 3 makes the Message Length
+	# a multiple of 4, so it is dropped and no payload is forwarded.
+	expect_drop DiameterDecap 'the Length field is not a multiple of 4'
+}
+
+@test "malformed-length-not-aligned-pushavp: the same frame dropped by DiameterPushAVP" {
+	run_click malformed-length-not-aligned-pushavp.click
+	# A rewriter inherits the header rule, so it drops the frame instead of
+	# appending to it and re-emitting the unaligned Length.
+	expect_drop DiameterPushAVP 'the Length field is not a multiple of 4'
+}
+
+@test "malformed-length-not-aligned-mismatch: the alignment reason outranks the mismatch" {
+	run_click malformed-length-not-aligned-mismatch.click
+	# A 24-octet packet whose Length says 25 carries both faults. The alignment
+	# test runs before the comparison, so moving it below the mismatch check
+	# fails here.
+	expect_drop DiameterDecap 'the Length field is not a multiple of 4'
+}
+
+@test "malformed-version-not-aligned: the Version reason outranks the alignment" {
+	run_click malformed-version-not-aligned.click
+	# Version 2 and Length 25 in one frame. The Version test runs first, so a
+	# hoisted alignment test fails here.
+	expect_drop DiameterDecap 'the Version field is not 1'
+}
+
+@test "malformed-short-not-aligned: the short-header reason outranks the alignment" {
+	run_click malformed-short-not-aligned.click
+	# A 10-octet frame declaring 25. The short-header guard runs before the
+	# alignment test, which also keeps the three-octet parse in bounds.
+	expect_drop DiameterDecap 'packet shorter than the 20-octet Diameter header'
 }
 
 @test "malformed-decap-length: Length mismatch dropped by DiameterDecap" {

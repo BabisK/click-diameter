@@ -29,9 +29,9 @@ The message is validated before the AVP is removed, so a malformed packet is
 dropped rather than rewritten: the element prints one
 C<DiameterPopAVP: dropping malformed packet: REASON> line when the Version field
 is not 1, when the packet is shorter than the 20-octet header, when its Length
-field does not equal the packet length, when an AVP in it is malformed or runs
-past the message end, or when the flags are illegal for the message type. The
-element takes no arguments.
+field is not a multiple of 4, when its Length field does not equal the packet
+length, when an AVP in it is malformed or runs past the message end, or when
+the flags are illegal for the message type. The element takes no arguments.
 
 =a
 
