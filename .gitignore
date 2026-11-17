@@ -30,6 +30,7 @@
 .idea/
 .agents/
 .opencode/
+.claude/
 
 # click files
 *.d
@@ -57,3 +58,7 @@ diameter-uelem.conf
 diameter-uelem.mk
 diameter-umain.cc
 diameter.mod.c
+.bmad-loop/runs/
+.bmad-loop/cache/
+.bmad-loop/policy.toml
+_bmad/render/
