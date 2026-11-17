@@ -30,17 +30,24 @@
 # avp-padding* and avp-decap-* tests pin the 4-octet AVP alignment of RFC 6733
 # section 4.1 and the rule that the decoder derives padding from Length alone.
 # The malformed-* tests assert the drop path instead: exit 0, one warning naming
-# the element and reason, and no Print line. The four configs the package refuses
-# -- ERROR on a request and RETRANSMITED on an answer in DiameterEncap, and
-# VENDORSPEC true without a non-zero VENDOR in DiameterPushAVP -- assert the
-# configure path: Click's whole configure-failure output and no Print line. The
-# smp-* tests are the ones run under `click -j 2`, with StaticThreadSched putting
-# two producers on two router threads: the Encap and AvpEncap frames derive their
-# Length from the packet, so a cross-thread write leaves the declared Length
-# disagreeing with the printed octets, while the PushAVP frame is a shape check
-# because its AVP Length comes from configuration. All three skip on a Click
-# built without multithread support, and none of them can see a race in shared
-# value storage: ThreadSanitizer is what proves that.
+# the element and reason, and no Print line. The ten configs the package
+# refuses -- ERROR on a request and RETRANSMITED on an answer in DiameterEncap,
+# VENDORSPEC true without a non-zero VENDOR in DiameterPushAVP, and two value
+# sources in one DiameterPushAVP -- assert the configure path: Click's whole
+# configure-failure output and no Print line. push-avp-conflict-three pins that
+# the error names the first conflicting pair in documented argument order rather
+# than a later pair. push-avp-rand-zero and
+# push-avp-randuint32-false pin the other side of the one-source rule: a zero
+# generator count and a false RANDUINT32 are not sources, so each configures and
+# prints a frame, and push-avp-duplicate-octetstring pins that a repeated
+# keyword is Click's last-wins rather than a second source. The smp-* tests are
+# the ones run under `click -j 2`, with StaticThreadSched putting two producers
+# on two router threads: the Encap and AvpEncap frames derive their Length from
+# the packet, so a cross-thread write leaves the declared Length disagreeing
+# with the printed octets, while the PushAVP frame is a shape check because its
+# AVP Length comes from configuration. All three skip on a Click built without
+# multithread support, and none of them can see a race in shared value storage:
+# ThreadSanitizer is what proves that.
 
 click=${CLICK:-click}
 click_timeout=${CLICK_TIMEOUT:-10}
@@ -186,6 +193,49 @@ expect_seeded() {
 	expect_configure_failure push-avp-vendor-zero.click DiameterPushAVP 'the VENDOR argument must be non-zero when VENDORSPEC is true (RFC 6733 section 4.1.1)'
 }
 
+@test "push-avp-conflict-octetstring-uint32: two value sources fail to configure" {
+	run_click push-avp-conflict-octetstring-uint32.click
+	# A-10: OCTETSTRING and UINT32 used to resolve by if/else order, so the
+	# string was emitted and the number -- the argument that decides the value
+	# type -- was discarded. At most one source is allowed.
+	expect_configure_failure push-avp-conflict-octetstring-uint32.click DiameterPushAVP 'the OCTETSTRING and UINT32 arguments cannot be used together: at most one value source may be supplied'
+}
+
+@test "push-avp-conflict-randnumstring-randhexstring: two generators fail to configure" {
+	run_click push-avp-conflict-randnumstring-randhexstring.click
+	# The same rule on the generator pair that used to take the first silently.
+	expect_configure_failure push-avp-conflict-randnumstring-randhexstring.click DiameterPushAVP 'the RANDNUMSTRING and RANDHEXSTRING arguments cannot be used together: at most one value source may be supplied'
+}
+
+@test "push-avp-conflict-empty-octetstring-uint32: an empty string is still a source" {
+	run_click push-avp-conflict-empty-octetstring-uint32.click
+	# The empty string requests the no-value AVP and the zero is a value, so both
+	# keywords are supplied even though both parsed values look empty. A presence
+	# test based on the value's length or magnitude would configure here.
+	expect_configure_failure push-avp-conflict-empty-octetstring-uint32.click DiameterPushAVP 'the OCTETSTRING and UINT32 arguments cannot be used together: at most one value source may be supplied'
+}
+
+@test "push-avp-conflict-octetstring-randuint32: a true boolean is a second source" {
+	run_click push-avp-conflict-octetstring-randuint32.click
+	# RANDUINT32 is a source only when true, so a presence table that dropped
+	# this row would let the configuration through and the draw would win.
+	expect_configure_failure push-avp-conflict-octetstring-randuint32.click DiameterPushAVP 'the OCTETSTRING and RANDUINT32 arguments cannot be used together: at most one value source may be supplied'
+}
+
+@test "push-avp-conflict-randalphanumstring-randalphastring: two string generators fail to configure" {
+	run_click push-avp-conflict-randalphanumstring-randalphastring.click
+	# Both generator rows supply one character each, so neither may be dropped
+	# from the presence table.
+	expect_configure_failure push-avp-conflict-randalphanumstring-randalphastring.click DiameterPushAVP 'the RANDALPHANUMSTRING and RANDALPHASTRING arguments cannot be used together: at most one value source may be supplied'
+}
+
+@test "push-avp-conflict-three: three value sources name the first pair in order" {
+	run_click push-avp-conflict-three.click
+	# The error names the first conflicting pair in documented argument order,
+	# OCTETSTRING before UINT32, rather than the last source encountered.
+	expect_configure_failure push-avp-conflict-three.click DiameterPushAVP 'the OCTETSTRING and UINT32 arguments cannot be used together: at most one value source may be supplied'
+}
+
 @test "push-avp-vendor-unused: VENDOR without VENDORSPEC leaves the AVP non-vendor" {
 	run_click push-avp-vendor-unused.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
@@ -266,6 +316,33 @@ expect_seeded() {
 	# The numeric path the presence rule keys off: UINT32 2001 is 000007d1, so
 	# the AVP Length is 12 and the frame 32 octets.
 	expect 'push-avp-uint32:   32 | 01000020 80000118 00000000 00000001 00000002 0000010c 0000000c 000007d1'
+}
+
+@test "push-avp-randuint32-false: a false boolean is not a value source" {
+	run_click push-avp-randuint32-false.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# RANDUINT32 false is its default, so it supplies nothing and OCTETSTRING is
+	# the single source: the frame is byte-identical to push-avp.click. Counting
+	# a present-but-false boolean as a source would refuse this configuration.
+	expect 'push-avp-randuint32-false:   32 | 01000020 80000118 00000000 00000001 00000002 00000108 0000000b 61626300'
+}
+
+@test "push-avp-rand-zero: a zero generator count is unused, not a second source" {
+	run_click push-avp-rand-zero.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# RANDNUMSTRING 0 is the documented "unused" value, so RANDHEXSTRING 4 is
+	# the single source: AVP Length 12 and four hex characters after the header.
+	local expected='^push-avp-rand-zero: +32 \| 01000020 80000118 00000000 00000001 00000002 00000108 0000000c (3[0-9]|4[1-6]){4}$'
+	[[ "$output" =~ $expected ]] || { echo "expected: 32 octets, AVP Length 12, four hex characters"; return 1; }
+}
+
+@test "push-avp-duplicate-octetstring: a repeated keyword is one source, last value wins" {
+	run_click push-avp-duplicate-octetstring.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# Click Args keeps the last repeated keyword, so this is one source ("bc"),
+	# not two: the conflict check must not count a keyword twice. The value is
+	# 2 octets, so AVP Length 10 and two zero pad octets.
+	expect 'push-avp-duplicate-octetstring:   32 | 01000020 80000118 00000000 00000001 00000002 00000108 0000000a 62630000'
 }
 
 @test "rand-alphanum-one: one generated character, AVP Length 9" {

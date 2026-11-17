@@ -38,14 +38,25 @@ shorter than the 20-octet header, when its Length field does not equal the
 packet length, when an AVP in it is malformed or runs past the message end, or
 when the flags are illegal for the message type.
 
-The value is a string when a source supplies one. With RANDUINT32 unset, the
-first of RANDALPHANUMSTRING, RANDNUMSTRING, RANDALPHASTRING and RANDHEXSTRING
-whose count is above zero generates it; otherwise a non-empty OCTETSTRING is
-used. A non-empty OCTETSTRING wins even over RANDUINT32, because the string is
-never cleared. When no string is available the value is a 4-octet big-endian
-number -- the RANDUINT32 draw when RANDUINT32 is set, UINT32 otherwise. A zero
-number is still a 4-octet value, so the AVP Length is 12 (16 with the vendor
-header), as RFC 6733 section 4.2 requires for Unsigned32.
+At most one value source may supply the value: a configuration that supplies
+two of OCTETSTRING, UINT32, RANDUINT32, RANDALPHANUMSTRING, RANDNUMSTRING,
+RANDALPHASTRING and RANDHEXSTRING fails configuration with an error naming the
+first conflicting pair in that documented argument order, because resolving the
+pair by precedence would silently discard the argument that decides the encoded
+value type. A repeated keyword is not two sources: Click's argument parsing
+takes the last occurrence, as it does for every argument. Each source counts as
+supplied on its own terms: OCTETSTRING and UINT32 when the keyword is present --
+an empty string and a zero number are values, not absences -- RANDUINT32 only
+when true, and a RAND*STRING generator only when its count is above zero, the
+documented "unused" value. Supplying no source at all is the empty-value case
+below, and a configuration that relied on the old precedence must keep only the
+source it wants.
+
+The value is a string when the source supplies one: the OCTETSTRING octets, or
+the generator's characters from its alphabet. Otherwise it is a 4-octet
+big-endian number -- the RANDUINT32 draw or the UINT32 value. A zero number is
+still a 4-octet value, so the AVP Length is 12 (16 with the vendor header), as
+RFC 6733 section 4.2 requires for Unsigned32.
 
 An AVP with no value is 8 octets long (12 with the vendor header), which is the
 empty-OctetString case section 4.2 permits: an empty OCTETSTRING, or no string
@@ -82,42 +93,49 @@ nor the message Length. Default is false.
 
 =item OCTETSTRING
 
-String. The value as literal octets, used when no RAND*STRING generator
-supplies one. An empty string appends an AVP with no value: Length 8, or 12
+String. The value as literal octets. Cannot be combined with UINT32,
+RANDUINT32 or a RAND*STRING generator: supplying a second value source fails
+configuration. An empty string appends an AVP with no value: Length 8, or 12
 with the vendor header.
 
 =item UINT32
 
-Integer. The value as a 4-octet big-endian number. Used only when no string is
-available and RANDUINT32 is false. A value of 0 is four zero octets, so the AVP
-Length is 12 (16 with the vendor header), per RFC 6733 section 4.2.
+Integer. The value as a 4-octet big-endian number. Cannot be combined with
+OCTETSTRING, RANDUINT32 or a RAND*STRING generator: supplying a second value
+source fails configuration. A value of 0 is four zero octets, so the AVP Length
+is 12 (16 with the vendor header), per RFC 6733 section 4.2.
 
 =item RANDUINT32
 
 Boolean. If true, a random 4-octet number drawn from click_random() is the
-value when no string is set, and the string generators do not run. Every draw
-is four octets, including a draw of zero: the AVP Length is 12 (16 with the
-vendor header), per RFC 6733 section 4.2. Default is false.
+value. Cannot be combined with OCTETSTRING, UINT32 or a RAND*STRING generator:
+supplying a second value source fails configuration. Every draw is four octets,
+including a draw of zero: the AVP Length is 12 (16 with the vendor header), per
+RFC 6733 section 4.2. Default is false, which supplies nothing.
 
 =item RANDALPHANUMSTRING
 
 Integer. Generates that many characters from C<0>-C<9>, C<A>-C<Z> and
-C<a>-C<z>. Zero means unused, which is the default.
+C<a>-C<z>. Cannot be combined with any other value source: supplying a second
+one fails configuration. Zero means unused, which is the default.
 
 =item RANDNUMSTRING
 
-Integer. Generates that many characters from C<0>-C<9>. Zero means unused,
-which is the default.
+Integer. Generates that many characters from C<0>-C<9>. Cannot be combined with
+any other value source: supplying a second one fails configuration. Zero means
+unused, which is the default.
 
 =item RANDALPHASTRING
 
-Integer. Generates that many characters from C<A>-C<Z> and C<a>-C<z>. Zero
-means unused, which is the default.
+Integer. Generates that many characters from C<A>-C<Z> and C<a>-C<z>. Cannot be
+combined with any other value source: supplying a second one fails
+configuration. Zero means unused, which is the default.
 
 =item RANDHEXSTRING
 
-Integer. Generates that many characters from C<0>-C<9> and C<A>-C<F>. Zero
-means unused, which is the default.
+Integer. Generates that many characters from C<0>-C<9> and C<A>-C<F>. Cannot be
+combined with any other value source: supplying a second one fails
+configuration. Zero means unused, which is the default.
 
 =back
 
