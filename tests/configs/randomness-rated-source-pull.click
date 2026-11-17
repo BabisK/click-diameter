@@ -1,7 +1,7 @@
 require(diameter);
 
-// F-11: the pull path draws the same identifiers as the task path, so
-// RandomSeed pins them. Unqueue pulls two messages in one run; they differ, and
+// F-11: the pull path advances the same identifier counters as the task path,
+// each seeded once from click_random(), so two messages in one run differ and
 // the same seed reproduces both runs byte for byte. The test rewrites the seed
 // and reruns after a second.
 RandomSeed(SEED 12345);

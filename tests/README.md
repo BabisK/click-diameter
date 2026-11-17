@@ -10,8 +10,8 @@ needs no Click at all.
 
 Requires [bats-core](https://github.com/bats-core/bats-core) 1.5 or newer — the
 seeded tests use `BATS_TEST_TMPDIR` — and a Click that carries the `RandomSeed`
-test element, which the `randomness-*` configs load. On the CI image bats comes
-from `apt-get install -y bats`.
+test element, which the `randomness-*` and `identifiers-*` configs load. On the
+CI image bats comes from `apt-get install -y bats`.
 
 ```sh
 bats --tap tests                              # click from PATH
@@ -65,14 +65,27 @@ live in `expect_seeded`, the seeded counterpart of `expect_drop` and
 in a copy, then again more than a second later, and requires the two packets of
 a run to differ, the two seeds to differ, and the rerun to reproduce the first
 run byte for byte. A stream seeded from the wall clock, frozen after one draw or
-ignoring the seed fails that. Five configs cover every drawing path changed by
-F-11: `randomness-encap` and `randomness-rated-source` for the generated
-identifiers, `randomness-rated-source-pull` for the pull path,
-`randomness-push-avp` for the generated string and
-`randomness-push-avp-uint32` for `RANDUINT32`. The `randomness-source` test is
-not a config: it greps `src/` and fails on any `srand`, `rand`, `srandom`,
-`random`, `click_srandom` or `click_random_srandom` call, so a reintroduced
-reseed fails even though no byte assertion can see `configure()`.
+ignoring the seed fails that. Five configs cover every seeded path changed by
+F-11: `randomness-encap` and `randomness-rated-source` for the identifiers,
+`randomness-rated-source-pull` for the pull path, `randomness-push-avp` for the
+generated string and `randomness-push-avp-uint32` for `RANDUINT32`. The two
+writer elements no longer draw an identifier per message: each seeds both
+counters once from `click_random()` in `initialize()` and advances them by one
+per emitted message, so each field is unique for the first 2^32 messages of a
+run. The `identifiers-*` configs prove that at the length where a 32-bit draw
+repeats: `identifiers-encap-unique` sends 240 000 messages through
+`DiameterEncap` from `InfiniteSource`, and `identifiers-rated-source-unique`
+sends the same count at `RATE 1000` through `DiameterRatedSource`. Both run under
+`click --simtime`, so four minutes of the story's rate takes under a second;
+`expect_unique_identifiers` requires 240 000 frames, 240 000 distinct hop-by-hop
+values, 240 000 distinct end-to-end values, no frame whose two identifiers are
+equal, and a byte-identical second run. A per-packet draw fails the distinct
+counts with the baseline's 11/7 and 17/13 duplicates and 37/30 equal pairs,
+while a counter that steps on a refused token fails the frame count. The
+`randomness-source` test is not a config: it greps `src/` and fails on any
+`srand`, `rand`, `srandom`, `random`, `click_srandom` or
+`click_random_srandom` call, so a reintroduced reseed fails even though no byte
+assertion can see `configure()`.
 
 The `rand-*` tests pin the length and the alphabet of each `DiameterPushAVP`
 generator; one of them appends 10 kB to the packet, so Click prints its
@@ -318,6 +331,8 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `randomness-push-avp.click` | `RandomSeed(SEED 12345)` with `DiameterPushAVP(RANDHEXSTRING 8)`: two 36-octet frames, reproduced across runs, values differ (F-11) |
 | `randomness-push-avp-uint32.click` | `RandomSeed(SEED 12345)` with `DiameterPushAVP(RANDUINT32 true)`: two 32-octet frames, reproduced across runs, values differ (F-11) |
 | `randomness-rated-source-pull.click` | `RandomSeed(SEED 12345)` with `Unqueue` forcing `DiameterRatedSource`'s pull path: two 20-octet frames, reproduced across runs, identifiers differ (F-11) |
+| `identifiers-encap-unique.click` | `RandomSeed(SEED 12345)` with 240 000 messages through `DiameterEncap` under `--simtime`: every hop-by-hop and end-to-end value distinct, no frame with two equal identifiers, reproduced across runs |
+| `identifiers-rated-source-unique.click` | the same counts at `RATE 1000` through `DiameterRatedSource` under `--simtime`, so a counter that steps on a refused token fails the frame count |
 | `popstorepush-roundtrip.click` | popping an unpadded AVP and pushing it back restores the 44-octet message (F-1) |
 | `no-avp.click` | a header-only message forwarded unchanged by both pop elements |
 | `malformed-version-decap.click` | a 20-octet Version 2 request dropped by `DiameterDecap`, no payload forwarded (A-5, RFC 6733 §3) |

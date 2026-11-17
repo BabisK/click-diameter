@@ -7,6 +7,7 @@
 #define DIAMETER_HH_
 
 #include <stdint.h>
+#include <click/atomic.hh>
 
 // Wire-format sizes shared by every element that reads or writes a Diameter
 // frame.
@@ -19,6 +20,59 @@ enum : uint32_t {
 	// refuse a CODE above it at configure time, and DiameterPushAVP drops a
 	// packet whose append would grow the message past it.
 	DIAMETER_MAX_24BIT_VALUE = 0xFFFFFF
+};
+
+// The hop-by-hop and end-to-end identifiers of one writer element. This is the
+// single place the RFC rule lives, so both writers hand out identifiers the
+// same way.
+//
+// A peer may read a repeated identifier as a retransmission or a replay (RFC
+// 6733 section 3), and a bare 32-bit draw repeats within a few hundred thousand
+// messages. Each field here is a counter instead: seed() fixes where both
+// sequences start, and every message the element emits advances both by one,
+// so each value repeats only after 2^32 messages of the run. The two fields
+// advance independently, which keeps one message's identifiers distinct.
+//
+// The end-to-end field keeps RFC 6733 section 3's split: its high-order 12 bits
+// are the epoch and its low-order 20 bits count, and a 32-bit increment carries
+// into the epoch exactly when the 20-bit counter wraps. The seed picks the
+// starting epoch, so the field has the RFC's shape without a wall-clock read;
+// that keeps two runs of one seed byte-identical. A new run starts a new
+// sequence from its seed; nothing is claimed across reboots.
+//
+// Both counters are atomic because one element may be fed from several router
+// threads (tests/configs/smp-encap.click does exactly that), and a plain field
+// would let two frames share a value.
+class DiameterIdentifierCounter {
+public:
+	DiameterIdentifierCounter() {
+		// atomic_uint32_t has no constructor, so both fields start here.
+		hbh = 0;
+		e2e = 0;
+	}
+
+	void seed(uint32_t hbhStart, uint32_t e2eStart) {
+		// Two equal draws would make the first message carry two equal
+		// identifiers. Bumping the second start keeps the two sequences
+		// apart, and each field still visits every 32-bit value exactly once
+		// before repeating.
+		if (hbhStart == e2eStart)
+			++e2eStart;
+		hbh = hbhStart;
+		e2e = e2eStart;
+	}
+
+	uint32_t nextHbh() {
+		return hbh.fetch_and_add(1);
+	}
+
+	uint32_t nextE2e() {
+		return e2e.fetch_and_add(1);
+	}
+
+private:
+	atomic_uint32_t hbh;
+	atomic_uint32_t e2e;
 };
 
 class DiameterHeader {

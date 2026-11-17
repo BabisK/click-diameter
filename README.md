@@ -176,8 +176,8 @@ Element reference
 
 | Element | In/out | Arguments | What it does |
 |---|---|---|---|
-| `DiameterRatedSource` | 0/1 | `CODE`, `REQUEST` (required); `RATE` (pps, default 10), `LIMIT`, `ACTIVE`, `APPID`, `STOP` | Emits bare 20-byte messages at a token-bucket rate; it never sets E, P or T, so a generated request carries R alone and a generated answer none; rejects a `CODE` above `0xFFFFFF` at configure time |
-| `DiameterEncap` | 1/1 | `CODE`, `REQUEST` (required); `ERROR`, `PROXIABLE`, `RETRANSMITED`, `APPID` | Prepends a 20-byte Diameter header to the packet and zero-pads the payload to a 4-octet boundary, counting the pad in the Length; accepts `PROXIABLE` on either type, rejects `ERROR` on a request and `RETRANSMITED` on an answer, and rejects a `CODE` above `0xFFFFFF` at configure time |
+| `DiameterRatedSource` | 0/1 | `CODE`, `REQUEST` (required); `RATE` (pps, default 10), `LIMIT`, `ACTIVE`, `APPID`, `STOP` | Emits bare 20-byte messages at a token-bucket rate; hop-by-hop and end-to-end identifiers are seeded once from `click_random()` and counter-advanced per emitted message, so each is unique for the first 2^32 messages of a run; it never sets E, P or T, so a generated request carries R alone and a generated answer none; rejects a `CODE` above `0xFFFFFF` at configure time |
+| `DiameterEncap` | 1/1 | `CODE`, `REQUEST` (required); `ERROR`, `PROXIABLE`, `RETRANSMITED`, `APPID` | Prepends a 20-byte Diameter header to the packet and zero-pads the payload to a 4-octet boundary, counting the pad in the Length; hop-by-hop and end-to-end identifiers are seeded once from `click_random()` and counter-advanced per emitted message, so each is unique for the first 2^32 messages of a run; accepts `PROXIABLE` on either type, rejects `ERROR` on a request and `RETRANSMITED` on an answer, and rejects a `CODE` above `0xFFFFFF` at configure time |
 | `DiameterDecap` | 1/1 | — | Strips the 20-byte header; validates the message first |
 | `DiameterPushAVP` | 1/1 | `CODE` (required); `VENDORSPEC`, `VENDOR`, `MANDATORY`; one of `OCTETSTRING`, `UINT32`, `RANDUINT32`, `RANDALPHANUMSTRING N`, `RANDNUMSTRING N`, `RANDALPHASTRING N`, `RANDHEXSTRING N` | Appends an AVP and updates the message Length; `MANDATORY` sets the AVP's M bit; two value sources are refused at configure time; validates the message first and drops a packet whose appended AVP would push the message Length past `0xFFFFFF`, with its own warning |
 | `DiameterPopAVP` | 1/1 | — | Removes the last AVP and updates the message Length; validates the message first |
@@ -290,11 +290,12 @@ that.
 Randomness
 ----------
 
-`DiameterRatedSource`, `DiameterEncap` and `DiameterPushAVP` draw every random
-field from Click's RNG through `click_random()`: the `hbh`/`e2e` identifiers of
-a generated header and the `RAND*` values of `DiameterPushAVP`. None of them
-seeds the generator. `RandomSeed(SEED n)` replaces Click's per-router random
-seed:
+Two kinds of random input reach these elements. `DiameterRatedSource` and
+`DiameterEncap` seed one counter per identifier, the `hbh` and `e2e` fields,
+once from `click_random()` when the element is initialized, then advance each
+counter by one for every message the element emits; `DiameterPushAVP` draws each
+`RAND*` value from `click_random()` per appended AVP. None of them seeds the
+generator. `RandomSeed(SEED n)` replaces Click's per-router random seed:
 
 ```click
 RandomSeed(SEED 12345);
@@ -302,11 +303,21 @@ RandomSeed(SEED 12345);
 
 The seed is process-global, so it also pins every other element drawing from
 `click_random()`, and its position in the configuration does not matter because
-the elements draw only at run time. Two runs of the same config then emit the
-same octets. The stream advances on every draw, so successive packets still
-differ; without a seed the values come from Click's own seed and vary from run
-to run. Reproduction assumes a single thread or a fixed draw order: a
-multi-threaded router's interleaving is not fixed by the seed.
+every element draws only after all elements are configured. Two runs of the same
+config then emit the same octets. The identifiers are counters rather than
+draws: each field is unique for the first 2^32 messages of a run, so a repeated
+hop-by-hop or end-to-end value means a wrap, not the birthday collision a 32-bit
+draw reaches in a few hundred thousand messages, and the counters are atomic, so
+two router threads never share a value. The end-to-end field keeps RFC 6733 §3's
+shape: its high-order 12 bits are the epoch, which advances when the low-order
+20 bits wrap, and the seed chooses the starting epoch instead of the clock, which
+is what keeps the run reproducible. A new run starts a new sequence from its
+seed; nothing is claimed across reboots. The `RAND*` generators consume the
+stream on every draw, so successive values differ; without a seed every value
+comes from Click's own seed and varies from run to run. Reproduction assumes a
+single thread or a fixed order for the `RAND*` draws: a multi-threaded router's
+interleaving is not fixed by the seed, although the counters still hand out
+distinct values.
 
 Known limitations
 -----------------

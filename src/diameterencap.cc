@@ -60,6 +60,19 @@ int DiameterEncap::configure(Vector<String> &conf, ErrorHandler *errh)
 	return 0;
 }
 
+int DiameterEncap::initialize(ErrorHandler *)
+{
+	// Seed once, after every element has been configured, so RandomSeed has
+	// already applied its seed wherever its statement sits. Name the two draws
+	// rather than passing them to one call: argument evaluation order is
+	// unspecified, and the seed must be the pair the first message used to
+	// draw so its bytes do not move.
+	uint32_t hbhStart = click_random();
+	uint32_t e2eStart = click_random();
+	ids.seed(hbhStart, e2eStart);
+	return 0;
+}
+
 Packet* DiameterEncap::simple_action(Packet * p_in)
 {
 	// Click does not serialise a push element across router threads, so the
@@ -76,8 +89,11 @@ Packet* DiameterEncap::simple_action(Packet * p_in)
 	const uint32_t payloadLength = p_in->length();
 	const uint32_t paddedLength = (payloadLength + 3) & ~3u;
 	const uint32_t paddingLength = paddedLength - payloadLength;
-	header.setHbh(click_random());
-	header.setE2e(click_random());
+	// The identifiers come from the two counters, not from the RNG, so each is
+	// unique for the first 2^32 messages of the run. The counters are atomic,
+	// so two router threads never share a value.
+	header.setHbh(ids.nextHbh());
+	header.setE2e(ids.nextE2e());
 	header.setLength(DIAMETER_MESSAGE_HEADER_LENGTH + paddedLength);
 
 	WritablePacket* wp = p_in->push(DIAMETER_MESSAGE_HEADER_LENGTH);
