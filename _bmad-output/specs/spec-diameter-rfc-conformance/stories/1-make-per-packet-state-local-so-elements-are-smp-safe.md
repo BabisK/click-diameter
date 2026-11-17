@@ -182,6 +182,9 @@ deferred:
   - `[false]` `[reject]` IA2-i Reconfiguration would now see the configured value instead of the last generated one — No reconfigure path exists for this element: it has no live-reconfigure handler, and Click replaces elements on hot reconfiguration, so the delta cannot be observed.
   - `[low]` `[reject]` IA2-j The refactor shifts per-packet cost — Same subject as B2-09; output is unchanged and the cost is an atomic pair on a configured string.
 
+### 2026-11-17 — Deferred-work closure
+- `[done]` `[deferred]` B2-05 `DiameterPopStorePushAVP` is a fourth writer the story does not acknowledge — Closed by `_bmad-output/implementation-artifacts/spec-popstorepush-smp-safety.md`: the element's store is now one `Spinlock`-guarded shared store, held across the store decision and the rewrite, and validation runs before the lock. `tests/configs/smp-popstorepush.click` feeds it from two producers on two router threads, and `tests/configs/smp-popstorepush-loop.click` pairs a pop on thread 0 with a push from a `DelayUnqueue` task on thread 1; the `7ac78a9` package exits 139 on the first config and fails `tests/tsan-check.sh` at `diameterpopstorepushavp.cc:27`, while this build passes both.
+
 ## Design Notes
 
 Copying the configured header per packet is cheap and correct: `DiameterHeader` and `AvpHeader` are plain structs with initialising constructors, and `String`'s reference count is atomic (`include/click/string.hh:256-259`), so reading the configured `String` from two threads is safe while no one writes it. That is exactly the invariant this story creates: `configure()` writes members, `simple_action()` only reads them.

@@ -54,7 +54,7 @@ runs:
           https://github.com/kohler/click.git "$CLICK_SHA"
         git -C "$RUNNER_TEMP/click" checkout --detach FETCH_HEAD
         cd "$RUNNER_TEMP/click"
-        # --enable-user-multithread is what makes the three smp-* configs
+        # --enable-user-multithread is what makes the five smp-* configs
         # exercise two router threads instead of skipping: a plain userlevel
         # build prints a warning and runs everything on one thread, so the
         # concurrency tests would silently become shape checks.

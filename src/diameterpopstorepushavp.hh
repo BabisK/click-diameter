@@ -7,6 +7,7 @@
 #ifndef DIAMETERPOPSTOREPUSHAVP_HH_
 #define DIAMETERPOPSTOREPUSHAVP_HH_
 #include <click/element.hh>
+#include <click/sync.hh>
 #include "diameter.hh"
 CLICK_DECLS
 
@@ -31,6 +32,13 @@ message Length, and sends the shortened message to output 0. On a later packet,
 while an AVP is stored, it validates the message, appends the stored AVP
 unchanged, adds its padded length to the message Length, sends the message to
 output 1 and clears the store.
+
+One store serves the whole element rather than one store per router thread: the
+element guards it with a spinlock and holds that lock across the store decision
+and the packet rewrite, so an AVP stored by a packet on one thread is appended
+to a packet that arrives on another thread, including one a queue hands back to
+the element later. The lock is released before the element pushes downstream, so
+no later element runs under it.
 
 A first packet that carries no AVPs is forwarded to output 0 unchanged and
 stores nothing, so the next packet is treated as another first packet.
@@ -64,7 +72,11 @@ public:
 
 	void push(int, Packet* p);
 private:
-	Packet *process(Packet *);
+	Packet *process(Packet *, uint32_t lastAvpOffset);
+	// The store. In the packet path every read and write of ah and data is
+	// under lock, because Click runs push() on any router thread; the
+	// constructor and destructor run with no packet in flight.
+	Spinlock lock;
 	AvpHeader ah;
 	uint8_t* data;
 };

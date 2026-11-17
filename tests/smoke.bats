@@ -72,9 +72,12 @@
 # on two router threads: the Encap and AvpEncap frames derive their Length from
 # the packet, so a cross-thread write leaves the declared Length disagreeing
 # with the printed octets, while the PushAVP frame is a shape check because its
-# AVP Length comes from configuration. All three skip on a Click built without
-# multithread support, and none of them can see a race in shared value storage:
-# ThreadSanitizer is what proves that.
+# AVP Length comes from configuration, and the PopStorePushAVP frames are a
+# shape and crash check because its shared store legitimately mixes the two
+# producers' markers. The PopStorePushAVP loop pairs a pop on thread 0 with a
+# push from a DelayUnqueue task on thread 1. All five skip on a Click built
+# without multithread support, and none of them can see a race in shared value
+# storage: ThreadSanitizer is what proves that.
 
 click=${CLICK:-click}
 click_timeout=${CLICK_TIMEOUT:-10}
@@ -676,6 +679,51 @@ expect_unique_identifiers() {
 	[ "$count" -gt 5000 ] || { echo "expected more than one source's 5000 frames, got $count"; return 1; }
 	[ "$fours" -gt 0 ] || { echo "expected 12-octet frames from the 4-octet value"; return 1; }
 	[ "$eights" -gt 0 ] || { echo "expected 16-octet frames from the 8-octet value"; return 1; }
+}
+
+@test "smp-popstorepush: one store pairs packets across two threads under -j 2" {
+	run_click_threads 2 smp-popstorepush.click
+	smp_skip_or_fail
+	# One element, one store, two threads: every input yields exactly one output
+	# frame, so every line must be the 32-octet remainder of an unarmed packet
+	# (message Length 0x20, the first 12-octet AVP) or the 56-octet message of
+	# an armed one (Length 0x38, its own two AVPs and the stored one). The AVP
+	# Length 0x0c is pinned against the four octets that follow it, so a header
+	# decoded by one thread and encoded by another fails here, and a crash fails
+	# the exit-status gate above. The store is shared, so an output-1 frame may
+	# mix the two markers and a legal perfect alternation can put one producer
+	# only on the armed slot; the test therefore requires both producers'
+	# hop-by-hop and end-to-end pairs somewhere in the output and both outputs to
+	# be non-empty, not each marker on each output. The frame floor proves the
+	# second producer ran too.
+	local zero='^smp-popstorepush-out0: +32 \| 01000020 80000118 00000000 (00000001 00000002|00000003 00000004) 00000109 4000000c (41414141|42424242)$'
+	local one='^smp-popstorepush-out1: +56 \| 01000038 80000118 00000000 (00000001 00000002|00000003 00000004) 00000109 4000000c (41414141|42424242) 00000108 4000000c (41414141|42424242) 00000108 4000000c (41414141|42424242)$'
+	local count=0 line
+	while IFS= read -r line; do
+		[[ "$line" =~ $zero || "$line" =~ $one ]] || { echo "unexpected frame: $line"; return 1; }
+		count=$((count + 1))
+	done <<<"$output"
+	[ "$count" -gt 5000 ] || { echo "expected more than one source's 5000 frames, got $count"; return 1; }
+	local out0 out1 producer
+	out0=$(grep '^smp-popstorepush-out0:' <<<"$output")
+	out1=$(grep '^smp-popstorepush-out1:' <<<"$output")
+	[ -n "$out0" ] || { echo "expected frames on output 0"; return 1; }
+	[ -n "$out1" ] || { echo "expected frames on output 1"; return 1; }
+	for producer in '00000001 00000002' '00000003 00000004'; do
+		grep -qF "$producer" <<<"$output" || { echo "expected producer $producer in the output"; return 1; }
+	done
+}
+
+@test "smp-popstorepush-loop: an AVP stored on one thread is appended on another" {
+	run_click_threads 2 smp-popstorepush-loop.click
+	smp_skip_or_fail
+	# The pop runs on thread 0. Its 32-octet remainder crosses a Queue, so the
+	# DelayUnqueue task bound to thread 1 pushes it back into the element, where
+	# the shared store must still hold the AVP popped on thread 0. A per-thread
+	# store would find nothing on thread 1: it would pop the remainder's only
+	# AVP, print a second 20-octet output-0 frame and never the 44-octet
+	# output-1 frame. Pin both frames exactly; the stop timer only ends the run.
+	expect $'out0:   32 | 01000020 80000118 00000000 00000001 00000002 00000108 0000000a 61620000\nout1:   44 | 0100002c 80000118 00000000 00000001 00000002 00000108 0000000a 61620000 0000010c 0000000a 78790000'
 }
 
 @test "pop-avp: removing the last AVP from a two-AVP message" {

@@ -146,6 +146,25 @@ expect_element_page() {
 	expect_element_page DiameterPopStorePushAVP
 }
 
+@test "manpages: DiameterPopStorePushAVP documents its one shared store" {
+	# The pairing rule is sequence-global rather than per thread: a caller
+	# learns here that one store serves the whole element, so a packet that
+	# returns on another thread still finds the AVP it is meant to pair with.
+	local text description flat
+	text=$(page DiameterPopStorePushAVP) || return 1
+	description=$(section DESCRIPTION <<<"$text")
+	# The page keeps the header's line breaks, so flatten before matching.
+	flat=${description//$'\n'/ }
+	grep -qF 'One store serves the whole element' <<<"$flat" || {
+		echo "DiameterPopStorePushAVP: DESCRIPTION does not state one shared store"
+		return 1
+	}
+	grep -qF 'arrives on another thread' <<<"$flat" || {
+		echo "DiameterPopStorePushAVP: DESCRIPTION does not state the cross-thread pairing rule"
+		return 1
+	}
+}
+
 @test "manpages: DiameterFlipRequest documents its page without arguments" {
 	expect_element_page DiameterFlipRequest
 }

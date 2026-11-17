@@ -103,7 +103,7 @@ The `rand-*` tests pin the length and the alphabet of each `DiameterPushAVP`
 generator; one of them appends 10 kB to the packet, so Click prints its
 `expensive Packet::put` advisory beside the `Print` line.
 
-The three `smp-*` tests are the only ones that run under `click -j 2`.
+The five `smp-*` tests are the only ones that run under `click -j 2`.
 Multithreading is a Click build option, so they need a Click configured with
 `--enable-user-multithread`; a plain build prints `warning: Click was built
 without multithread support, running single threaded` and `-j 2` silently
@@ -125,7 +125,7 @@ cd <package> && ./configure --with-click="$HOME/click-mt" --prefix="$HOME/click-
 CLICK="$HOME/click-mt/bin/click" bats --tap --filter 'smp-' tests
 ```
 
-CI builds its Click with that flag, so the gate runs all three. Without it a
+CI builds its Click with that flag, so the gate runs all five. Without it a
 local run reports a skip, and the two-thread evidence comes from a run like the
 one above or from the ThreadSanitizer check below.
 
@@ -145,13 +145,33 @@ What each one proves, and what it does not:
   appends has the same Length no matter which thread wins. Its two sources carry
   different Command Codes, so the output shows that both threads pushed, but a
   verdict on that element's shared state needs ThreadSanitizer.
+- `smp-popstorepush` is a shape and no-crash check over the one shared store:
+  every input yields exactly one output frame, the 32-octet remainder of an
+  unarmed packet or the 56-octet message of an armed one, so a frame whose
+  Length or AVP Length disagrees with its octets fails the run, as does the
+  crash the pre-change package produces when two threads rewrite the member
+  header and the store at once. Marker mixing is legal here: the store is shared
+  by both threads, so an output-1 frame can pair one producer's packet with the
+  other's stored AVP, and a perfect alternation can leave one producer only on
+  the armed slot, so the test requires both producers' hop-by-hop and end-to-end
+  pairs somewhere in the output rather than on each output. A verdict on the
+  store itself needs ThreadSanitizer.
+- `smp-popstorepush-loop` proves the pairing rule across threads: the pop runs on
+  thread 0, the 32-octet remainder crosses a `Queue`, and a `DelayUnqueue` bound
+  to thread 1 pushes it back into the element, which must still hold the AVP
+  popped on thread 0 and emit the restored 44-octet message on output 1. A
+  per-thread store would pop the remainder again and print a second 20-octet
+  output-0 frame, so the two pinned frames fail it. It carries one packet, so it
+  proves nothing about contention or header corruption; `smp-popstorepush` and
+  ThreadSanitizer cover that.
 
-None of the three can see a race in the shared `String` that holds `DiameterPushAVP`'s value:
+None of the five can see a race in the shared `String` that holds `DiameterPushAVP`'s value:
 a corrupted value is still hex, so any regex over the printed octets accepts it.
 ThreadSanitizer is what proves that part, and it is the reproducible negative
-control for all three elements: on the pre-change package it reports races
-rooted at `diameterpushavp.cc`'s `datastring` assignment and aborts, while a
-fixed package reports no racing access inside this package at all.
+control for these elements: on the pre-change package it reports races rooted at
+`diameterpushavp.cc`'s `datastring` assignment and at
+`diameterpopstorepushavp.cc`'s store, and aborts, while a fixed package reports
+no racing access inside this package at all.
 
 `tests/tsan-check.sh CLICK CONFIG...` runs that check. CI runs it in the
 `thread-sanitizer` job against a Click and a package built with
@@ -162,6 +182,18 @@ means a crash or a configuration failure, while the race verdict comes only from
 reports whose racing access (`#0` frame) is in `src/diameter.*`. It also fails if
 the installed module does not link `libtsan`, which is the trap a plain
 `make install` into a sanitizer prefix leaves.
+
+The script ignores a report only when its racing `#0` access is in Click's
+`click/sync.hh` or `click/atomic.hh` and the same report's stack names
+`Spinlock::`; every other report is judged on its package frames as before. The
+lock is an inline-assembly `xchg` loop, which ThreadSanitizer cannot see, so the
+lock's `_lock`, `_owner` and `_depth` accesses are reported as races even though
+the `xchg` orders them, and those frames are Click core, not package state. An
+element that holds a `Spinlock` therefore announces its critical section with
+`__tsan_acquire`/`__tsan_release` (a no-op in a non-sanitizer build), so a race
+on the data the lock protects is still reported on the element's own line and
+still fails the check. `DiameterPopStorePushAVP` is the only element that takes
+that lock.
 
 To reproduce locally, build the pair the way the job does:
 
@@ -273,7 +305,7 @@ drop line its own row names.
 CI runs the same command on every pull request and every push to `master`, plus
 monthly against the latest Click master, so a local pass over the same Click is
 the same check. CI's Click is built with `--enable-user-multithread`, so the
-three `smp-*` tests run there rather than skipping; the `thread-sanitizer` job
+five `smp-*` tests run there rather than skipping; the `thread-sanitizer` job
 runs the same script against a sanitizer build, so a local run only reproduces a
 failure.
 
@@ -324,6 +356,8 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `smp-push-avp.click` | two `DiameterRatedSource` elements on two threads into one `DiameterPushAVP` under `click -j 2`: every frame is one 36-octet append, Length `0x24`, AVP Length `0x10`, and both sources' Command Codes appear (CAP-5 shape check) |
 | `smp-encap.click` | two 4- and 8-octet payloads on two threads into one `DiameterEncap`: every frame's Length matches its octets, so a cross-thread write fails the run (CAP-5) |
 | `smp-avpencap.click` | the same two payloads on two threads into one `DiameterAvpEncap`: every frame's AVP Length matches its octets (CAP-5) |
+| `smp-popstorepush.click` | two 44-octet two-AVP messages on two threads into one `DiameterPopStorePushAVP`: every output-0 frame is the 32-octet remainder, every output-1 frame the 56-octet message with its two AVPs and the stored one, each AVP Length 0x0c against its four value octets, both producers' hop-by-hop and end-to-end pairs appear somewhere in the output, and both outputs are non-empty; the pre-change package crashes on the same config (shape and no-crash check; the shared store makes marker mixing legal, ThreadSanitizer proves the store) |
+| `smp-popstorepush-loop.click` | one 44-octet message popped on thread 0, its remainder sent through a `Queue` and returned by a `DelayUnqueue` on thread 1: output 0 prints the 32-octet remainder and output 1 the restored 44-octet message, so a per-thread store (which would print a second 20-octet output-0 frame and never the output-1 frame) fails the pinned bytes |
 | `pop-avp.click` | removing the last AVP from a two-AVP message |
 | `avp-roundtrip.click` | `DiameterAvpEncap` then `DiameterAvpDecap` returns the payload |
 | `avp-padding.click` | a 5-octet value pads to a 16-octet AVP: Length 13, three zero octets |
