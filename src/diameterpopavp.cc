@@ -39,6 +39,8 @@ Packet* DiameterPopAVP::simple_action(Packet * p_in)
 	ah.decode(p_in->data() + lastAvpOffset);
 	p_in->take(ah.getLengthPadded());
 	WritablePacket* wp = p_in->put(0);
+	if (!wp)
+		return 0;
 	dh.setLength(messageLength - ah.getLengthPadded());
 	dh.encode(wp->data());
 

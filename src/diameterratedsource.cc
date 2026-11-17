@@ -124,11 +124,19 @@ DiameterRatedSource::run_task(Task *)
 	// counter value, so push and pull share one sequence and neither skips a
 	// value. The local copy keeps a task and a pull from writing one header.
 	DiameterHeader header = dh;
-	header.setHbh(ids.nextHbh());
-	header.setE2e(ids.nextE2e());
+	// Both allocation steps can fail and free what they hold; a packet that is
+	// never emitted must not leave the router with a null dereference. The
+	// counters advance only after them, so a failed allocation consumes no
+	// identifier.
 	Packet *p = _packet->clone();
+	if (!p)
+	    return false;
 	p->set_timestamp_anno(Timestamp::now());
 	WritablePacket *wp = p->put(0);
+	if (!wp)
+	    return false;
+	header.setHbh(ids.nextHbh());
+	header.setE2e(ids.nextE2e());
 	wp->set_timestamp_anno(Timestamp::now());
 	header.encode(wp->data());
 	output(0).push(wp);
@@ -154,17 +162,23 @@ DiameterRatedSource::pull(int)
 
     _tb.refill();
     if (_tb.remove_if(1)) {
-	_count++;
 	// The same counters the push task uses, stepped once for this returned
 	// packet only: a refusal above consumed nothing.
 	DiameterHeader header = dh;
-	header.setHbh(ids.nextHbh());
-	header.setE2e(ids.nextE2e());
+	// Same guards as the task path: a failed clone or extension returns no
+	// packet instead of dereferencing null, and consumes no identifier.
 	Packet *p = _packet->clone();
+	if (!p)
+	    return 0;
 	p->set_timestamp_anno(Timestamp::now());
 	WritablePacket *wp = p->put(0);
+	if (!wp)
+	    return 0;
+	header.setHbh(ids.nextHbh());
+	header.setE2e(ids.nextE2e());
 	wp->set_timestamp_anno(Timestamp::now());
 	header.encode(wp->data());
+	_count++;
 	return wp;
     } else
 	return 0;

@@ -90,7 +90,7 @@ rfc-conformance capabilities beyond the success-signal exception; no new branch.
 
 ### 2026-11-17 — Verification review of stories 3-9
 
-- verdicts: 13 findings (V-1 through V-13), all patched.
+- verdicts: 13 findings (V-1 through V-13): 12 patched, 1 rejected below.
 - `[patched]` V-1: the identifier helper's equal-pair check compared hex fields numerically; now a string comparison. Verified: `SEED 10` reports 377 false matches before the fix and 0 after; the pre-change stream's 37/30 are 0/0 as strings.
 - `[patched]` V-2: story 9's 37/30 baseline numbers corrected to 0/0, with the duplicate counts kept as the real defect.
 - `[patched]` V-3: `randomness-encap` and `randomness-rated-source` pin the literal first frame; the seed+1 mutant fails them.

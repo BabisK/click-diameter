@@ -37,29 +37,32 @@
 # randomness-* and malformed-* configs never cover the AVP header). The
 # avp-padding* and avp-decap-* tests pin the 4-octet AVP alignment of RFC 6733
 # section 4.1 and the rule that the decoder derives padding from Length alone.
-# The encap-padding* tests pin the message-level twin from section 3:
-# DiameterEncap zero-pads the payload to a 4-octet boundary and counts the pad in
-# the Message Length, and DiameterDecap forwards the pad with the payload.
-# encap-padding-push-avp pins the limit of that repair: a padded body that is
-# not an AVP sequence is still dropped by an AVP reader, so the pad satisfies
-# the header rule only. The
+# The encap-unaligned-payload test pins the writer half of section 3's message
+# rule: a payload that is not on a 4-octet boundary cannot be a sequence of padded
+# AVPs, so DiameterEncap drops it rather than padding it into a plausible frame.
+# encap-body-not-avps pins the limit of the remaining rule: a 4-octet body passes
+# the writer because it is aligned, but an AVP reader still drops it, so
+# alignment repairs the header's Length rule only. The
 # malformed-* tests assert the drop path instead: exit 0, one warning naming the
 # element and reason, and no Print line. They cover a bad Version, a short
 # packet, an unaligned or mismatched Length, an over-long or malformed AVP, a V
 # bit with a zero Vendor-Id, and an illegal flag. The not-aligned configs pin the
 # reason precedence: the Version outranks the alignment, the short-header guard
 # outranks it, and it outranks the Length mismatch.
-# The fourteen configs the package refuses -- ERROR on a request and
+# The twenty-one configs the package refuses -- ERROR on a request and
 # RETRANSMITED on an answer in DiameterEncap, VENDORSPEC true without a non-zero
-# VENDOR in DiameterPushAVP, two value sources in one DiameterPushAVP, and a
-# CODE above the three-octet Command Code field in either writer -- assert the
-# configure path: Click's whole configure-failure output and no Print line.
+# VENDOR in DiameterPushAVP, two value sources in one DiameterPushAVP, a repeated
+# keyword in each of the four configurable elements, a RAND*STRING count past the
+# three-octet Length, and a CODE above the three-octet Command Code field in
+# either writer -- assert the configure path: Click's whole configure-failure
+# output and no Print line.
 # push-avp-conflict-three pins that the error names the first conflicting pair
-# in documented argument order rather than a later pair. push-avp-rand-zero and
+# in documented argument order rather than a later pair.
+# push-avp-duplicate-wrapped pins that a repeat split across a line still fails:
+# Click treats the newline as whitespace. push-avp-rand-zero and
 # push-avp-randuint32-false pin the other side of the one-source rule: a zero
 # generator count and a false RANDUINT32 are not sources, so each configures and
-# prints a frame, and push-avp-duplicate-octetstring pins that a repeated
-# keyword is Click's last-wins rather than a second source. The two code-max
+# prints a frame. The two code-max
 # configs pin the inclusive Command Code ceiling: 16777215 (0xFFFFFF) is in
 # range and prints ffffff, so an off-by-one guard fails there. The push-avp
 # length pair pins the three-octet Message Length ceiling from both sides: an
@@ -467,6 +470,14 @@ expect_unique_identifiers() {
 	expect_configure_failure push-avp-duplicate-octetstring.click DiameterPushAVP 'the OCTETSTRING argument is given more than once'
 }
 
+@test "push-avp-duplicate-wrapped: a repeat split across a line still fails" {
+	run_click push-avp-duplicate-wrapped.click
+	# Click treats the newline as whitespace, so `MANDATORY true, MANDATORY
+	# <newline>false` is two arguments; the scan must end a keyword at any
+	# whitespace or this configuration silently keeps the last value.
+	expect_configure_failure push-avp-duplicate-wrapped.click DiameterPushAVP 'the MANDATORY argument is given more than once'
+}
+
 @test "encap-duplicate-code: a repeated keyword fails configuration" {
 	run_click encap-duplicate-code.click
 	# The same guard runs in every configurable element of the package.
@@ -707,6 +718,39 @@ expect_unique_identifiers() {
 	expect 'DiameterAvpEncap: dropping packet: the AVP Length would exceed the three-octet field (RFC 6733 section 4.1)'
 }
 
+@test "avp-encap-length-max: the largest legal AVP Length still emits" {
+	run_click avp-encap-length-max.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# One octet below the overflow config: 16,777,207 value octets plus the
+	# 8-octet header is 0xFFFFFF, so the guard must be > rather than >=. The
+	# 16 MB append makes Click print one Put advisory beside the Print line.
+	local printed others
+	printed=$(grep '^avp-encap-length-max:' <<<"$output")
+	others=$(grep -v '^avp-encap-length-max:' <<<"$output" | grep -v '^expensive Packet::put' || true)
+	[ -z "$others" ] || { echo "unexpected output beside the Print line: $others"; return 1; }
+	[ "$printed" = 'avp-encap-length-max: 16777216 | 00000108 00ffffff' ] || { echo "unexpected line: $printed"; return 1; }
+}
+
+@test "avp-encap-length-max-vendor: the vendor header's inclusive ceiling emits" {
+	run_click avp-encap-length-max-vendor.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# 16,777,203 value octets plus the 12-octet vendor header is 0xFFFFFF; the
+	# AVP carries flags 80, Length ffffff and Vendor-Id 42. The 16 MB append
+	# makes Click print one Put advisory beside the Print line.
+	local printed others
+	printed=$(grep '^avp-encap-length-max-vendor:' <<<"$output")
+	others=$(grep -v '^avp-encap-length-max-vendor:' <<<"$output" | grep -v '^expensive Packet::put' || true)
+	[ -z "$others" ] || { echo "unexpected output beside the Print line: $others"; return 1; }
+	[ "$printed" = 'avp-encap-length-max-vendor: 16777216 | 00000108 80ffffff 0000002a' ] || { echo "unexpected line: $printed"; return 1; }
+}
+
+@test "avp-encap-duplicate-code: a repeated keyword fails configuration" {
+	run_click avp-encap-duplicate-code.click
+	# The shared duplicate guard runs in all four configurable elements; this is
+	# the fourth one's own path.
+	expect_configure_failure avp-encap-duplicate-code.click DiameterAvpEncap 'the CODE argument is given more than once'
+}
+
 @test "avp-padding-vendor: the 12-octet vendor header is padded too" {
 	run_click avp-padding-vendor.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
@@ -810,24 +854,24 @@ pop: +20 \| 01000014 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8}$'
 	expect 'flip-answer-ep:   20 | 01000014 c0000118 00000000 00000001 00000002'
 }
 
-@test "decap: stripping the 20-byte header leaves the payload" {
+@test "decap: stripping the 20-byte header leaves the AVP body" {
 	run_click decap.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
-	expect 'decap:    4 | deadbeef'
+	expect 'decap:    8 | 00000108 00000008'
 }
 
-@test "decap-p-on-answer: P on an answer is not an error, payload forwarded" {
+@test "decap-p-on-answer: P on an answer is not an error, body forwarded" {
 	run_click decap-p-on-answer.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
 	# The receive rule polices E and T only; P is legal on either type, so a
 	# guard that dropped P would fail here.
-	expect 'decap-p-on-answer:    4 | deadbeef'
+	expect 'decap-p-on-answer:    8 | 00000108 00000008'
 }
 
-@test "decap-t-on-request: T on a request is not an error, payload forwarded" {
+@test "decap-t-on-request: T on a request is not an error, body forwarded" {
 	run_click decap-t-on-request.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
-	expect 'decap-t-on-request:    4 | deadbeef'
+	expect 'decap-t-on-request:    8 | 00000108 00000008'
 }
 
 @test "pop-avp-error-on-answer: E on an answer is forwarded unchanged" {
@@ -859,59 +903,40 @@ pop: +20 \| 01000014 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8}$'
 	[[ "$output" =~ $expected ]] || { echo "expected: 20 octets, version 1, Length 20, no payload"; return 1; }
 }
 
-@test "encap-padding: a 5-octet payload is padded to 28 octets with three zero octets" {
-	run_click encap-padding.click
+@test "encap-unaligned-payload: a payload that cannot be padded AVPs is dropped" {
+	run_click encap-unaligned-payload.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
-	# A-4: RFC 6733 section 3 makes the Message Length a multiple of 4, so the
-	# 5-octet payload gains three zero pad octets and Length 0x1c. Decap accepts
-	# the frame and forwards the pad with the payload: 8 octets, no drop line.
-	local expected='^encap: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} deadbeef 00000000
-decap: +8 \| deadbeef 00000000$'
-	[[ "$output" =~ $expected ]] || { echo "expected: a 28-octet frame with Length 0x1c, then its 8 forwarded octets"; return 1; }
+	# CAP-2/A-4: the writer used to zero-pad the tail of a 5-octet payload into
+	# a plausible 28-octet frame. That body is not an AVP sequence, so the
+	# frame was one its own readers reject; it is now dropped with its own line
+	# and nothing reaches Print.
+	expect 'DiameterEncap: dropping packet: the payload length is not a multiple of 4, so it cannot be a sequence of padded AVPs (RFC 6733 section 3)'
 }
 
-@test "encap-padding-two: a 6-octet payload gets two zero pad octets" {
-	run_click encap-padding-two.click
-	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
-	# The same 28-octet frame and Length 0x1c, with the two pad octets after the
-	# six payload octets. A formula that only handled the three-octet residue
-	# fails here.
-	local expected='^encap-padding-two: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} deadbeef 00110000$'
-	[[ "$output" =~ $expected ]] || { echo "expected: 28 octets, Length 0x1c, deadbeef 00110000"; return 1; }
-}
-
-@test "encap-padding-one: a 7-octet payload gets one zero pad octet" {
-	run_click encap-padding-one.click
-	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
-	# The one-octet residue: 28 octets, Length 0x1c, one zero octet after the
-	# seven payload octets.
-	local expected='^encap-padding-one: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} deadbeef 00112200$'
-	[[ "$output" =~ $expected ]] || { echo "expected: 28 octets, Length 0x1c, deadbeef 00112200"; return 1; }
-}
-
-@test "encap-padding-push-avp: a padded non-AVP body is still dropped by an AVP reader" {
-	run_click encap-padding-push-avp.click
-	# The pad satisfies the header's Length rule only. The padded body is not an
-	# AVP sequence (its fifth octet is data, not a length), so DiameterPushAVP
-	# drops it: padding does not make an arbitrary payload walkable.
-	expect_drop DiameterPushAVP 'AVP length below its header'
+@test "encap-body-not-avps: alignment does not make an arbitrary body walkable" {
+	run_click encap-body-not-avps.click
+	# A 4-octet body passes the writer (it is aligned), but it is not an AVP
+	# sequence, so DiameterPushAVP drops it. Alignment repairs the header's
+	# Length rule only; the body is the caller's.
+	expect_drop DiameterPushAVP 'packet shorter than the 8-octet AVP header'
 }
 
 @test "encap-length-overflow: a message past 0xFFFFFF is dropped, not wrapped" {
 	run_click encap-length-overflow.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
-	# A 16,777,200-octet payload pads to the same length, and 20 plus that exceeds
-	# the three-octet Message Length; the frame is dropped before put().
+	# A 16,777,200-octet payload plus the 20-octet header exceeds the three-octet
+	# Message Length; the frame is dropped before push().
 	expect 'DiameterEncap: dropping packet: the message Length would exceed the three-octet field (RFC 6733 section 3)'
 }
 
-@test "encap-decap: the encapsulated payload survives Decap without a drop" {
+@test "encap-decap: the encapsulated AVP body survives Decap without a drop" {
 	run_click encap-decap.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
-	# Only the two Print lines: any drop warning fails the regex.
-	local expected='^encap: +24 \| 01000018 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} deadbeef
-decap: +4 \| deadbeef$'
-	[[ "$output" =~ $expected ]] || { echo "expected: the 24-octet message, then deadbeef after Decap"; return 1; }
+	# Only the two Print lines: any drop warning fails the regex. The body is a
+	# valid AVP because Decap validates the whole message.
+	local expected='^encap: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
+decap: +8 \| 00000108 00000008$'
+	[[ "$output" =~ $expected ]] || { echo "expected: the 28-octet message, then the AVP after Decap"; return 1; }
 }
 
 @test "encap-push-pop: Encap then PushAVP then PopAVP keeps the frame consistent" {
@@ -1055,7 +1080,16 @@ pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
 }
 
 @test "randomness-rated-source-pull: RandomSeed reproduces the pull path's identifiers across runs" {
-	expect_seeded randomness-rated-source-pull.click 20
+	# The literal first frame pins the draw order in pull(): a swap of the two
+	# nextX() calls or an extra draw moves it.
+	expect_seeded randomness-rated-source-pull.click 20 \
+		'rated-source-pull:   20 | 01000014 80000118 0000002a 16d5a847 3328a195'
+}
+
+@test "identifiers-rated-source-pull-unique: a refused pull consumes no identifier" {
+	# RATE 10 leaves refused pulls between the three returned packets, so a
+	# counter advanced before remove_if(1) leaves a gap in the consecutive span.
+	expect_identifier_run identifiers-rated-source-pull-unique.click 3
 }
 
 @test "identifiers-encap-unique: 240 000 messages carry distinct hop-by-hop and end-to-end values" {
@@ -1071,6 +1105,18 @@ pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
 	# high-order 12 bits must carry. Distinctness, string equality and the
 	# consecutive span all fail if the low 20 bits are masked without carry.
 	expect_identifier_run identifiers-encap-wrap.click 1048577
+}
+
+@test "identifiers-encap-drop-then-emit: a dropped packet consumes no identifier" {
+	local out="$BATS_TEST_TMPDIR/drop-then-emit"
+	run_click_simtime identifiers-encap-drop-then-emit.click "$out"
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# The 5-octet payload is refused before the counters, so the emitted frame
+	# still carries the seed's first two draws. Advancing the counters before
+	# the drop guard would print the second pair here. The simulated clock fixes
+	# the two packets' order.
+	local expected=$'DiameterEncap: dropping packet: the payload length is not a multiple of 4, so it cannot be a sequence of padded AVPs (RFC 6733 section 3)\nids:   24 | 01000018 80000118 00000000 16d5a847 3328a195 deadbeef'
+	[ "$(cat "$out")" = "$expected" ] || { echo "expected: the drop line then the first-pair frame"; echo "got: $(cat "$out")"; return 1; }
 }
 
 @test "randomness-encap-push-avp: a seeded writer leaves the RAND* stream at a fixed position" {
@@ -1106,6 +1152,23 @@ pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
 	others=$(grep -v '^out0:' <<<"$output" | grep -v '^expensive Packet::put' || true)
 	[ "$others" = 'DiameterPopStorePushAVP: dropping packet: pushing the stored AVP would exceed the three-octet Length field (RFC 6733 section 3)' ] || { echo "unexpected output: $others"; return 1; }
 	[[ "$printed" =~ ^out0:\ +20\ \|\ 01000014\ 80000118\ 00000000\ 00000001\ 00000002$ ]] || { echo "expected: out0 20 octets"; return 1; }
+}
+
+@test "popstorepush-store-retained: an overflow drop keeps the stored AVP for a later packet" {
+	local out="$BATS_TEST_TMPDIR/store-retained"
+	run_click_simtime popstorepush-store-retained.click "$out"
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# Packet 1 arms the store (out0 is the popped 20-octet header), packet 2 is
+	# dropped because it cannot hold the stored maximal AVP, and packet 3 carries
+	# it on output 1. A drop that clears the store fails the out1 line. The
+	# simulated clock fixes the three packets' order.
+	local output printed others
+	output=$(cat "$out")
+	printed=$(grep '^out1:' <<<"$output")
+	others=$(grep -v '^out0:' <<<"$output" | grep -v '^out1:' | grep -v '^expensive Packet::put' || true)
+	[ "$others" = 'DiameterPopStorePushAVP: dropping packet: pushing the stored AVP would exceed the three-octet Length field (RFC 6733 section 3)' ] || { echo "unexpected output: $others"; return 1; }
+	[[ "$output" =~ out0:\ +20\ \|\ 01000014\ 80000118\ 00000000\ 00000001\ 00000002 ]] || { echo "expected: out0 20 octets"; return 1; }
+	[[ "$printed" =~ ^out1:\ +16777212\ \|\ 01fffffc\ 80000118\ 00000000\ 00000001\ 00000002\ 00000108\ 00ffffe8\ [0-9a-f]{8}\ [0-9a-f]{8}$ ]] || { echo "expected: out1 carries the stored AVP on a 16,777,212-octet message"; return 1; }
 }
 
 @test "malformed-version-decap: Version 2 dropped by DiameterDecap, no payload forwarded" {

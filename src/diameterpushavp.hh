@@ -73,11 +73,11 @@ still a 4-octet value, so the AVP Length is 12 (16 with the vendor header), as
 RFC 6733 section 4.2 requires for Unsigned32.
 
 An AVP with no value is 8 octets long (12 with the vendor header), which is the
-empty-OctetString case section 4.2 permits: an empty OCTETSTRING, or no string
+empty-OctetString case that section 4.2 permits: an empty OCTETSTRING, or no string
 source and no numeric source at all. This element has no dictionary, so it
 cannot tell an OctetString AVP from an Unsigned32 one; an AVP whose application
 specification makes it Unsigned32 or Integer32 needs UINT32 or RANDUINT32,
-because a value-less one does not have the length section 4.2 requires.
+because a value-less one does not have the length that section 4.2 requires.
 
 Keyword arguments are:
 

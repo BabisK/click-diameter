@@ -34,8 +34,8 @@ enum : uint32_t {
 // keep their seeded offset in a single-threaded run, so one message's
 // identifiers differ.
 //
-// The end-to-end field is a plain 32-bit counter presented with a twelve/
-// twenty split: its high-order 12 bits advance when the low-order 20 bits wrap,
+// The end-to-end field is a plain 32-bit counter; its high-order 12 bits
+// advance when the low-order 20 bits wrap,
 // so the field reads like the RFC's shape without a wall-clock read. RFC 6733
 // section 3 only says implementations MAY, upon reboot, put the low-order 12
 // bits of the current time in the high half and a random value in the low half;

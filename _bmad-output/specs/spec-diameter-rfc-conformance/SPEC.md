@@ -33,7 +33,7 @@ A pain to solve, with a correctness mandate behind it. The package builds, parse
 ## Constraints
 
 - Fix only A-1 through A-10. Every C-item in `spec-diameter-capabilities` — extra validation, answer construction, byte-stream framing, richer AVP types, Result-Code and redirect, field access — is out of scope.
-- Existing `.click` configurations keep working. Argument changes are additive; a change to an element name, argument or port count updates dependent configs in the same commit.
+- Existing `.click` configurations keep working. Argument changes are additive; a change to an element name, argument or port count updates dependent configs in the same commit. The one sanctioned exception is the verification repair's package-wide refusal of a repeated keyword and its configure-time cap on `RAND*STRING` counts: both reject a configuration that used to load, and both are recorded here so the contract and the code agree.
 - `MANDATORY` defaults to false so existing configs keep their exact bytes.
 - A malformed frame is dropped with one warning line naming the element and reason, never forwarded or repaired into a plausible message.
 - `RandomSeed` still reproduces a run; any counter added for A-7 seeds only from `click_random`.
@@ -46,7 +46,7 @@ A pain to solve, with a correctness mandate behind it. The package builds, parse
 
 - No new elements, no Diameter dictionary, no transport, retransmission or session state.
 - No persistent state and no cross-reboot identifier uniqueness.
-- No redesign of the argument syntax beyond adding `MANDATORY`.
+- No redesign of the argument syntax beyond adding `MANDATORY` and the verification repair's repeated-keyword refusal and `RAND*STRING` cap.
 - No change to anything listed under "Verified-correct behaviour" or "Not defects" in `findings.md`; those are the regression surface.
 - No performance work. CI pipeline work is limited to what the thread-safety story needs: building Click with `--enable-user-multithread` so the two-thread configs run (story 10), and a ThreadSanitizer job that gates on `tests/tsan-check.sh` (story 11). No other pipeline change.
 

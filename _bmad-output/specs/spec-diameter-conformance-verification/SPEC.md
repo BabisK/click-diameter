@@ -10,7 +10,7 @@ sources: []
 
 ## Why
 
-A mandate to meet: the RFC 6733 conformance delivery (stories 3–9) is green, but its verification layer misreports the work. Two stories ship code while recording "no implementation was started"; the identifier test's equal-pair check compares numbers rather than identifiers; two acceptance claims — the padded `DiameterEncap` frame being walkable, and 37/30 equal identifiers on the baseline — are false; and the two subtlest invariants, the advance-on-emission counters and the seeded first frame, have no observer. The delivery also left a six-item deferred queue: two observation gaps, a silent repeated-keyword rule, and three unguarded three-octet fields plus an unbounded generator count. Anyone auditing conformance from these artifacts is told the wrong thing, and the regressions those tests and guards exist to catch would pass.
+A mandate to meet: the RFC 6733 conformance delivery (stories 3–9) is green, but its verification layer misreports the work. Two stories ship code while recording "no implementation was started"; the identifier test's equal-pair check compares numbers rather than identifiers; two acceptance claims — the padded `DiameterEncap` frame being walkable, and 37/30 equal identifiers on the baseline — are false; and the two subtlest invariants, the advance-on-emission counters and the seeded first frame, have no observer. The delivery also left a six-item deferred queue (DW-1 to DW-6): two observation gaps, a silent repeated-keyword rule, the Encap, PopStorePush and AvpEncap three-octet ceilings, and an unbounded generator count. Anyone auditing conformance from these artifacts is told the wrong thing, and the regressions those tests and guards exist to catch would pass.
 
 ## Capabilities
 
@@ -33,7 +33,7 @@ A mandate to meet: the RFC 6733 conformance delivery (stories 3–9) is green, b
 ## Constraints
 
 - One pull request on `spec/diameter-rfc-conformance`; no new branch.
-- Identifiers stay `click_random()` draws under a fixed `RandomSeed`, so the seeded bytes are reproducible and may be pinned; the pins are the RNG's output for `SEED 12345`, not a libc-independent constant.
+- Identifiers stay seeded from `click_random()` under a fixed `RandomSeed`: one draw per field at initialization, then a counter advance per emitted message, so the seeded bytes are reproducible and may be pinned; the pins are the RNG's output for `SEED 12345`, not a libc-independent constant.
 - No wire-format change. The only behaviour change is the allocation-failure null check; `DiameterEncap`'s padding stays because `SPEC-diameter-rfc-conformance` CAP-2 pins it.
 - The man-page phrases `seeded once from click_random()` and `unique for the first 2^32 messages of a run` stay, because `tests/manpages.bats` asserts them.
 - Tabs for indentation; warning-free at `-Wall -Wextra`; the full bats suite green.
