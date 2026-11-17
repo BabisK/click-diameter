@@ -336,18 +336,15 @@ distinct values.
 Known limitations
 -----------------
 
-Two open items remain outside this branch: the racy per-packet state of
-`DiameterPopStorePushAVP` when one instance is fed from two router threads (the
-other three writers keep theirs in locals), and the upstream Click fork
+One open item remains outside this branch: the upstream Click fork
 `BabisK/click`, which still carries `conf/test.click`, which does not configure,
 and `etc/diameter/`, a stale in-tree copy of these elements (F-16; `findings.md`
 records the fork under its former name, `babisk/diameter`). The fork's removal is
 one commit there — delete `conf/test.click` and `etc/diameter/` — so nothing in
-this package can perform or verify it. Both items are recorded in
-`_bmad-output/implementation-artifacts/deferred-work.md`. The package identity
-(F-14) and the stale include guards, the `<iostream>` includes in data-path
-elements and the dead `simple_action()` beside `push()` (F-15) are fixed, and
-`tests/identity.bats` pins them. The symptom evidence for all three stays in
+this package can perform or verify it. The package identity (F-14) and the stale
+include guards, the `<iostream>` includes in data-path elements and the dead
+`simple_action()` beside `push()` (F-15) are fixed, and `tests/identity.bats`
+pins them. The symptom evidence for all three stays in
 `_bmad-output/specs/spec-diameter-package-hardening/findings.md`.
 
 Layout

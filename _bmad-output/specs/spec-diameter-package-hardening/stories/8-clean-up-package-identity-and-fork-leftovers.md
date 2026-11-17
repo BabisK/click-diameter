@@ -125,6 +125,9 @@ baseline_revision: '3a9d9dc906dad74d0d7d78655d2cd6226ef36832'
   - `[low]` `[reject]` (intent) "remove the dead `simple_action`" reads as delete, while the diff renames it — the dead thing is the unreachable override, and deleting the body would fold fifty lines into `push()`; the rename removes the hook and keeps the structure.
   - `[false]` `[reject]` (intent) the spec is authored alongside the change, so it is not independent evidence of the intent — refuted: the spec is the change's own account of itself by construction, and the audit was run against the `stories.yaml` entry, not against that account.
 
+### 2026-11-17 — Deferred-work closure
+- `[done]` `[deferred]` F-16 the upstream fork `BabisK/click` still carries `conf/test.click` and a stale in-tree copy of these elements — Dropped by operator decision as `BabisK/click` work: the removal is one commit in that fork (`git rm conf/test.click && git rm -r etc/diameter`), so nothing in this package can perform or verify it. Closed and recorded by `_bmad-output/implementation-artifacts/spec-popstorepush-smp-safety.md`.
+
 ## Design Notes
 
 - **Version 2.1 is the defensible choice.** The only concrete complaint F-14 makes is that `2.0.1` is "unrelated to the Click version it targets"; the package targets Click 2.1 (`README.md:19`, `SPEC.md:44`), and Click's own `AC_INIT([click], [2.1])` shows the bracketed form. A package version tied to the host version it is built against keeps the two visibly in step, and there is no release history to invent a package version from.

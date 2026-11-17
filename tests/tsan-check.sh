@@ -17,6 +17,18 @@
 # that same frame, so the module suffix is a package frame too: without it a
 # shared-String race is reported as Click code and ignored.
 #
+# Click's Spinlock is the one Click header whose races are the lock itself:
+# click/sync.hh and the click/atomic.hh it is built from use an inline-assembly
+# xchg loop that the sanitizer cannot see, so the lock's own _lock, _owner and
+# _depth accesses are reported as races although the xchg orders them on every
+# architecture Click supports. Those frames are Click core, not package state.
+# A report is therefore ignored only when its racing #0 access is in those two
+# headers and the same report's stack names Spinlock::; every other report is
+# judged on its package frames as before, so an element that holds a Spinlock
+# announces the critical section to the sanitizer (__tsan_acquire/
+# __tsan_release) and a race on the data the lock protects is still reported on
+# the element's own line and still fails here.
+#
 # Expects a Click and a package that were both built with -fsanitize=thread.
 # Exits 0 when every config ran and no package frame raced, 1 on a race or a
 # failed run, 2 on a usage or build error.
@@ -70,9 +82,34 @@ for config in "$@"; do
 	fi
 
 	races=$(awk '
-		/^SUMMARY: ThreadSanitizer/ { inreport = 0 }
-		/ThreadSanitizer: data race/ { inreport = 1 }
-		inreport && /^ *#0 / && (/src\/diameter[^ ]*:/ || /\(diameter\.uo\+/) { print }
+		function flush() {
+			if (package_frame != "" && !(first0 ~ /include\/click\/(sync|atomic)\.hh:/ && report ~ /Spinlock::/))
+				printf "%s", package_frame
+			package_frame = ""
+			first0 = ""
+			report = ""
+		}
+		/^WARNING: ThreadSanitizer: data race/ {
+			flush()
+			inreport = 1
+			report = $0 "\n"
+			next
+		}
+		/^SUMMARY: ThreadSanitizer/ {
+			flush()
+			inreport = 0
+			next
+		}
+		inreport {
+			report = report $0 "\n"
+			if (/^ *#0 /) {
+				if (first0 == "")
+					first0 = $0
+				if (/src\/diameter[^ ]*:/ || /\(diameter\.uo\+/)
+					package_frame = package_frame $0 "\n"
+			}
+		}
+		END { flush() }
 	' "$out")
 
 	if [ -n "$races" ]; then
