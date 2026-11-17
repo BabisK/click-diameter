@@ -73,6 +73,15 @@ DiameterRatedSource::configure(Vector<String> &conf, ErrorHandler *errh)
 int
 DiameterRatedSource::initialize(ErrorHandler *errh)
 {
+    // Seed once, after every element has been configured, so RandomSeed has
+    // already applied its seed wherever its statement sits. Name the two draws
+    // rather than passing them to one call: argument evaluation order is
+    // unspecified, and the seed must be the pair the first message used to
+    // draw so its bytes do not move.
+    uint32_t hbhStart = click_random();
+    uint32_t e2eStart = click_random();
+    ids.seed(hbhStart, e2eStart);
+
     _count = 0;
     if (output_is_push(0))
 	ScheduleInfo::initialize_task(this, &_task, errh);
@@ -100,16 +109,20 @@ DiameterRatedSource::run_task(Task *)
 	return false;
     }
 
-    dh.setHbh(click_random());
-    dh.setE2e(click_random());
-
     _tb.refill();
     if (_tb.remove_if(1)) {
+	// Copy the configured header and stamp the identifiers only for a message
+	// that is actually emitted: a token-bucket refusal must not consume a
+	// counter value, so push and pull share one sequence and neither skips a
+	// value. The local copy keeps a task and a pull from writing one header.
+	DiameterHeader header = dh;
+	header.setHbh(ids.nextHbh());
+	header.setE2e(ids.nextE2e());
 	Packet *p = _packet->clone();
 	p->set_timestamp_anno(Timestamp::now());
 	WritablePacket *wp = p->put(0);
 	wp->set_timestamp_anno(Timestamp::now());
-	dh.encode(wp->data());
+	header.encode(wp->data());
 	output(0).push(wp);
 	_count++;
 	_task.fast_reschedule();
@@ -131,17 +144,19 @@ DiameterRatedSource::pull(int)
 	return 0;
     }
 
-    dh.setHbh(click_random());
-    dh.setE2e(click_random());
-
     _tb.refill();
     if (_tb.remove_if(1)) {
 	_count++;
+	// The same counters the push task uses, stepped once for this returned
+	// packet only: a refusal above consumed nothing.
+	DiameterHeader header = dh;
+	header.setHbh(ids.nextHbh());
+	header.setE2e(ids.nextE2e());
 	Packet *p = _packet->clone();
 	p->set_timestamp_anno(Timestamp::now());
 	WritablePacket *wp = p->put(0);
 	wp->set_timestamp_anno(Timestamp::now());
-	dh.encode(wp->data());
+	header.encode(wp->data());
 	return wp;
     } else
 	return 0;

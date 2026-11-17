@@ -22,13 +22,19 @@ prepends a Diameter header to each packet
 
 Prepends a 20-octet Diameter header to every incoming packet. The header
 carries version 1, Length 20 plus the padded payload, the Command Code CODE,
-the Application-Id APPID, and hop-by-hop and end-to-end identifiers drawn from
-click_random() for each packet. RFC 6733 section 3 requires the Message Length
-to be a multiple of 4, so the payload is zero-padded up to a 4-octet boundary
-and the pad octets count in the Length: a 5-octet payload gains three zero pad
-octets and Length 28, while a payload already on the boundary gains none and
-keeps its bytes. The pad is part of the message, so DiameterDecap forwards it
-along with the payload.
+the Application-Id APPID, and hop-by-hop and end-to-end identifiers. Each
+identifier is seeded once from click_random() when the element is initialized and
+then advanced by one for every message the element emits, so each field is unique
+for the first 2^32 messages of a run and RandomSeed reproduces the sequence byte
+for byte. The end-to-end field keeps RFC 6733 section 3's twelve/twenty split:
+its high-order 12 bits are the epoch, which advances when the low-order 20 bits
+wrap, and the seed chooses the starting epoch rather than the clock. A new run
+starts a new sequence from its seed; nothing is claimed across reboots. RFC 6733
+section 3 requires the Message Length to be a multiple of 4, so the payload is
+zero-padded up to a 4-octet boundary and the pad octets count in the Length: a
+5-octet payload gains three zero pad octets and Length 28, while a payload
+already on the boundary gains none and keeps its bytes. The pad is part of the
+message, so DiameterDecap forwards it along with the payload.
 
 CODE and REQUEST are required. The flags start clear and only the arguments the
 caller names are set: E from ERROR, P from PROXIABLE and T from RETRANSMITED.
@@ -94,12 +100,17 @@ public:
     const char *port_count() const		{ return PORTS_1_1; }
 
     int configure(Vector<String> &conf, ErrorHandler *errh) CLICK_COLD;
+    int initialize(ErrorHandler *errh) CLICK_COLD;
     Packet *simple_action(Packet * p_in);
 
 private:
     // Configuration only: configure() fills it, and simple_action() copies it
     // into a local header per packet instead of writing it.
     DiameterHeader dh;
+
+    // Seeded in initialize(), advanced once per emitted message: the data path
+    // never draws from the RNG.
+    DiameterIdentifierCounter ids;
 };
 
 CLICK_ENDDECLS

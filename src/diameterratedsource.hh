@@ -25,10 +25,18 @@ generates bare Diameter messages at a fixed rate
 
 Creates 20-octet Diameter messages with no AVPs and emits them from its single
 output at RATE packets per second. Every message carries version 1, Length 20,
-the Command Code CODE and the Application-Id APPID, and draws fresh hop-by-hop
-and end-to-end identifiers from click_random(). The E, P and T bits are always
-clear, so a generated request carries R alone and a generated answer carries no
-flag at all. Nothing is padded: a message without AVPs needs no pad octets.
+the Command Code CODE and the Application-Id APPID, and hop-by-hop and
+end-to-end identifiers. Each identifier is seeded once from click_random() when
+the element is initialized and then advanced by one for every message the
+element emits, whether the packet leaves through the push task or through pull,
+so each field is unique for the first 2^32 messages of a run and RandomSeed
+reproduces the sequence byte for byte. The end-to-end field keeps RFC 6733
+section 3's twelve/twenty split: its high-order 12 bits are the epoch, which
+advances when the low-order 20 bits wrap, and the seed chooses the starting
+epoch rather than the clock. A new run starts a new sequence from its seed;
+nothing is claimed across reboots. The E, P and T bits are always clear, so a
+generated request carries R alone and a generated answer carries no flag at all.
+Nothing is padded: a message without AVPs needs no pad octets.
 
 CODE and REQUEST are required. RATE, LIMIT and ACTIVE may also be given as
 positional arguments, in that order; APPID and STOP are optional keywords,
@@ -135,7 +143,13 @@ public:
     Packet *_packet;
     Task _task;
     Timer _timer;
+    // Configuration only: run_task() and pull() copy it into a local header and
+    // stamp that, so no shared field is written per message.
     DiameterHeader dh;
+
+    // Seeded in initialize(), advanced once per emitted message. Push and pull
+    // share one pair of sequences.
+    DiameterIdentifierCounter ids;
 
     void setup_packet();
 

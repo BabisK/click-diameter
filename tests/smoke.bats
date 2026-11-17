@@ -14,11 +14,15 @@
 # for byte. The randomness-* configs pin RandomSeed(SEED 12345) and require the
 # two packets of a run to differ, a rewritten seed to change the octets, and a
 # rerun over a second later to reproduce the first run byte for byte, so a
-# clock-seeded stream fails. The rand-* tests pin the length and the alphabet of
-# each DiameterPushAVP generator. The push-avp-vendor* configs pin the V=1
-# header bytes and the refusal of a zero Vendor-Id. The push-avp-uint32* configs
-# pin A-3: a zero numeric value is a four-octet value at AVP Length 12 (16 with
-# the vendor header), and a non-zero UINT32 is the same four octets;
+# clock-seeded stream fails. The identifiers-* configs run 240 000 messages in
+# Click's simulated time and require every hop-by-hop and end-to-end value to be
+# distinct, no frame whose two identifiers agree, and a byte-identical rerun, so
+# a per-packet draw's birthday collisions fail the run. The rand-* tests pin the
+# length and the alphabet of each DiameterPushAVP generator. The push-avp-vendor*
+# configs pin the V=1 header bytes and the refusal of a zero Vendor-Id. The
+# push-avp-uint32* configs pin A-3: a zero numeric value is a four-octet value at
+# AVP Length 12 (16 with the vendor header), and a non-zero UINT32 is the same
+# four octets;
 # push-avp-empty, push-avp-empty-vendor and push-avp-no-value pin the no-value
 # shapes that must stay at the header length. The push-avp tests compare
 # whole frames -- literally, or as a pattern where a generated value cannot be
@@ -77,6 +81,17 @@ run_config() {
 # run_click CONFIG -- run configs/CONFIG under a timeout, capturing the output.
 run_click() {
 	run_config "$BATS_TEST_DIRNAME/configs/$1"
+}
+
+# run_click_simtime CONFIG -- run configs/CONFIG in Click's simulated time, so
+# a rate-shaped config reaches its LIMIT in a fraction of the wall-clock time
+# while keeping the story's rate. The timeout still bounds the run.
+run_click_simtime() {
+	if command -v timeout >/dev/null 2>&1; then
+		run timeout "$click_timeout" "$click" --simtime "$BATS_TEST_DIRNAME/configs/$1"
+	else
+		run "$click" --simtime "$BATS_TEST_DIRNAME/configs/$1"
+	fi
 }
 
 # run_click_threads N CONFIG -- run configs/CONFIG on N router threads under a
@@ -168,6 +183,40 @@ expect_seeded() {
 
 	sleep 1.1
 	run_config "$config"
+	[ "$status" -eq 0 ] || { echo "click exit $status on the rerun"; return 1; }
+	[ "$output" = "$first_run" ] || { echo "expected the rerun to reproduce the first run byte for byte"; return 1; }
+}
+
+# expect_unique_identifiers CONFIG COUNT -- the identifier-counter contract for
+# configs/CONFIG, run in Click's simulated time: exactly COUNT printed frames,
+# COUNT distinct hop-by-hop values, COUNT distinct end-to-end values, no frame
+# whose two identifiers agree, and a byte-identical second run. A per-packet
+# draw repeats within COUNT values, a counter that starts both fields at one
+# value leaves the first frame with equal identifiers, and a clock-seeded start
+# cannot reproduce the second run, so each assertion names one way to break the
+# guarantee. Print puts hop-by-hop in field 7 and end-to-end in field 8.
+expect_unique_identifiers() {
+	local count="$2"
+	run_click_simtime "$1"
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	local first_run="$output"
+	local frames distinct_hbh distinct_e2e equal
+	frames=$(wc -l <<<"$first_run")
+	[ "$frames" -eq "$count" ] || { echo "expected $count frames, got $frames"; return 1; }
+	distinct_hbh=$(awk '{ print $7 }' <<<"$first_run" | sort -u | wc -l)
+	[ "$distinct_hbh" -eq "$count" ] || {
+		echo "expected $count distinct hop-by-hop values, got $distinct_hbh"
+		return 1
+	}
+	distinct_e2e=$(awk '{ print $8 }' <<<"$first_run" | sort -u | wc -l)
+	[ "$distinct_e2e" -eq "$count" ] || {
+		echo "expected $count distinct end-to-end values, got $distinct_e2e"
+		return 1
+	}
+	equal=$(awk '$7 == $8' <<<"$first_run" | wc -l)
+	[ "$equal" -eq 0 ] || { echo "expected no frame with equal identifiers, got $equal"; return 1; }
+
+	run_click_simtime "$1"
 	[ "$status" -eq 0 ] || { echo "click exit $status on the rerun"; return 1; }
 	[ "$output" = "$first_run" ] || { echo "expected the rerun to reproduce the first run byte for byte"; return 1; }
 }
@@ -888,6 +937,14 @@ pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
 
 @test "randomness-rated-source-pull: RandomSeed reproduces the pull path's identifiers across runs" {
 	expect_seeded randomness-rated-source-pull.click 20
+}
+
+@test "identifiers-encap-unique: 240 000 messages carry distinct hop-by-hop and end-to-end values" {
+	expect_unique_identifiers identifiers-encap-unique.click 240000
+}
+
+@test "identifiers-rated-source-unique: the same counts through the token bucket" {
+	expect_unique_identifiers identifiers-rated-source-unique.click 240000
 }
 
 @test "popstorepush-roundtrip: unpadded AVP pop then push restores the message" {

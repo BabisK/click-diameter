@@ -219,6 +219,26 @@ expect_element_page() {
 	}
 }
 
+@test "manpages: the two writers document the seeded identifier counters" {
+	local element text description flat
+	for element in DiameterEncap DiameterRatedSource; do
+		text=$(page "$element") || return 1
+		description=$(section DESCRIPTION <<<"$text")
+		# The page keeps the header's line breaks, so flatten the description
+		# before matching the prose. The seeding rule and the in-run uniqueness
+		# guarantee are the only place a caller learns what RandomSeed buys.
+		flat=${description//$'\n'/ }
+		grep -qF 'seeded once from click_random()' <<<"$flat" || {
+			echo "$element: DESCRIPTION does not name the identifier seeding rule"
+			return 1
+		}
+		grep -qF 'unique for the first 2^32 messages of a run' <<<"$flat" || {
+			echo "$element: DESCRIPTION does not state in-run identifier uniqueness"
+			return 1
+		}
+	done
+}
+
 @test "manpages: the two pop elements document the no-AVP no-op" {
 	local element text description
 	for element in DiameterPopAVP DiameterPopStorePushAVP; do
