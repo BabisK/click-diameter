@@ -15,20 +15,22 @@
 # two packets of a run to differ, a rewritten seed to change the octets, and a
 # rerun over a second later to reproduce the first run byte for byte, so a
 # clock-seeded stream fails. The rand-* tests pin the length and the alphabet of
-# each DiameterPushAVP generator. The avp-padding*
+# each DiameterPushAVP generator. The push-avp-vendor* configs pin the V=1
+# header bytes and the refusal of a zero Vendor-Id. The avp-padding*
 # and avp-decap-* tests pin the 4-octet AVP alignment of RFC 6733 section 4.1
 # and the rule that the decoder derives padding from Length alone. The
 # malformed-* tests assert the drop path instead: exit 0, one warning naming the
-# element and reason, and no Print line. The two configs the package refuses --
-# ERROR on a request and RETRANSMITED on an answer -- assert the configure path:
-# Click's whole configure-failure output and no Print line. The smp-* tests are
-# the ones run under `click -j 2`, with StaticThreadSched putting two producers
-# on two router threads: the Encap and AvpEncap frames derive their Length from
-# the packet, so a cross-thread write leaves the declared Length disagreeing
-# with the printed octets, while the PushAVP frame is a shape check because its
-# AVP Length comes from configuration. All three skip on a Click built without
-# multithread support, and none of them can see a race in shared value storage:
-# ThreadSanitizer is what proves that.
+# element and reason, and no Print line. The four configs the package refuses --
+# ERROR on a request and RETRANSMITED on an answer in DiameterEncap, and
+# VENDORSPEC true without a non-zero VENDOR in DiameterPushAVP -- assert the
+# configure path: Click's whole configure-failure output and no Print line. The
+# smp-* tests are the ones run under `click -j 2`, with StaticThreadSched putting
+# two producers on two router threads: the Encap and AvpEncap frames derive their
+# Length from the packet, so a cross-thread write leaves the declared Length
+# disagreeing with the printed octets, while the PushAVP frame is a shape check
+# because its AVP Length comes from configuration. All three skip on a Click
+# built without multithread support, and none of them can see a race in shared
+# value storage: ThreadSanitizer is what proves that.
 
 click=${CLICK:-click}
 click_timeout=${CLICK_TIMEOUT:-10}
@@ -90,13 +92,16 @@ expect_drop() {
 	[ "$output" = "$warning" ] || { echo "expected: $warning"; return 1; }
 }
 
-# expect_configure_failure CONFIG MESSAGE -- a non-zero exit and Click's whole
-# configure-failure output for that config: the config path and line, the
-# element being configured, the named error, and the closing line. A crash, a
-# second error, an extra warning or a packet that reached Print fails the run.
+# expect_configure_failure CONFIG ELEMENT MESSAGE -- a non-zero exit and Click's
+# whole configure-failure output for that config: the config path and line, the
+# element being configured, the named error, and the closing line. The element
+# is a parameter because more than one element refuses a configuration. Click
+# numbers the element in its suffix, so the @N part is matched with a wildcard.
+# A crash, a second error, an extra warning or a packet that reached Print fails
+# the run.
 expect_configure_failure() {
 	[ "$status" -ne 0 ] || { echo "expected a configure failure, click exit $status"; return 1; }
-	local expected="$BATS_TEST_DIRNAME/configs/$1":*": While configuring 'DiameterEncap@2 :: DiameterEncap':"$'\n'"  $2"$'\n'"Router could not be initialized!"
+	local expected="$BATS_TEST_DIRNAME/configs/$1":*": While configuring '$2@* :: $2':"$'\n'"  $3"$'\n'"Router could not be initialized!"
 	[[ "$output" == $expected ]] || { echo "expected: $expected"; echo "got: $output"; return 1; }
 }
 
@@ -148,6 +153,35 @@ expect_seeded() {
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
 	local generated='^push-avp-rand: +36 \| 01000024 80000118 00000000 00000001 00000002 00000108 00000010 (3[0-9]|4[1-9a-f]|5[0-9a]|6[1-9a-f]|7[0-9a]){4} (3[0-9]|4[1-9a-f]|5[0-9a]|6[1-9a-f]|7[0-9a]){4}$'
 	[[ "$output" =~ $generated ]] || { echo "expected: 36 bytes, AVP length 16, 8 generated alphanumeric characters"; return 1; }
+}
+
+@test "push-avp-vendor: a vendor AVP carries its Vendor-Id and the V flag" {
+	run_click push-avp-vendor.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# 20-octet request plus a 12-octet header, a 3-octet value and one zero pad
+	# octet: 36 octets, Length 0x24, AVP flags 80, AVP Length 0x0f, Vendor-Id 42.
+	expect 'push-avp-vendor:   36 | 01000024 80000118 00000000 00000001 00000002 00000108 8000000f 0000002a 61626300'
+}
+
+@test "push-avp-vendor-missing: VENDORSPEC without VENDOR fails to configure" {
+	run_click push-avp-vendor-missing.click
+	# A-1: RFC 6733 section 4.1.1 forbids Vendor-Id zero with V set, so the
+	# absent VENDOR is refused instead of writing an indeterminate id.
+	expect_configure_failure push-avp-vendor-missing.click DiameterPushAVP 'the VENDOR argument must be non-zero when VENDORSPEC is true (RFC 6733 section 4.1.1)'
+}
+
+@test "push-avp-vendor-zero: VENDOR 0 with VENDORSPEC fails to configure" {
+	run_click push-avp-vendor-zero.click
+	# An explicit zero is the same forbidden value as the absent argument.
+	expect_configure_failure push-avp-vendor-zero.click DiameterPushAVP 'the VENDOR argument must be non-zero when VENDORSPEC is true (RFC 6733 section 4.1.1)'
+}
+
+@test "push-avp-vendor-unused: VENDOR without VENDORSPEC leaves the AVP non-vendor" {
+	run_click push-avp-vendor-unused.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# The Vendor-Id is ignored without VENDORSPEC: the frame is the same 32
+	# octets as push-avp.click, with an 8-octet header and no V bit.
+	expect 'push-avp-vendor-unused:   32 | 01000020 80000118 00000000 00000001 00000002 00000108 0000000b 61626300'
 }
 
 @test "rand-alphanum-one: one generated character, AVP Length 9" {
@@ -525,7 +559,7 @@ pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
 
 @test "encap-error-on-request: ERROR on a request fails to configure" {
 	run_click encap-error-on-request.click
-	expect_configure_failure encap-error-on-request.click 'the ERROR argument cannot be set on a request (RFC 6733 section 3)'
+	expect_configure_failure encap-error-on-request.click DiameterEncap 'the ERROR argument cannot be set on a request (RFC 6733 section 3)'
 }
 
 @test "encap-proxiable-on-answer: P is legal on either type, flags 40" {
@@ -540,7 +574,7 @@ pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
 
 @test "encap-retransmit-on-answer: RETRANSMITED on an answer fails to configure" {
 	run_click encap-retransmit-on-answer.click
-	expect_configure_failure encap-retransmit-on-answer.click 'the RETRANSMITED argument cannot be set on an answer (RFC 6733 section 3)'
+	expect_configure_failure encap-retransmit-on-answer.click DiameterEncap 'the RETRANSMITED argument cannot be set on an answer (RFC 6733 section 3)'
 }
 
 @test "rated-source: 20 octets, version 1, Length 20, flags 80, code 000118" {
@@ -596,6 +630,42 @@ pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
 @test "malformed-avpdecap-v-short: 8-octet V AVP dropped by DiameterAvpDecap" {
 	run_click malformed-avpdecap-v-short.click
 	expect_drop DiameterAvpDecap 'packet shorter than the 12-octet vendor AVP header'
+}
+
+@test "malformed-avpdecap-vendor-id-zero: V set with Vendor-Id 0 dropped by DiameterAvpDecap" {
+	run_click malformed-avpdecap-vendor-id-zero.click
+	# A-6: the 12-octet header is present and its Length agrees, but RFC 6733
+	# section 4.1.1 forbids Vendor-Id zero with V set.
+	expect_drop DiameterAvpDecap 'the V bit is set with a zero Vendor-Id'
+}
+
+@test "malformed-avpdecap-vendor-id-zero-length: a Length fault outranks the Vendor-Id reason" {
+	run_click malformed-avpdecap-vendor-id-zero-length.click
+	# The AVP has V set, Vendor-Id 0 and Length 8, below its 12-octet header.
+	# Structural checks run first, so hoisting the Vendor-Id test above them
+	# fails here.
+	expect_drop DiameterAvpDecap 'AVP length below its header'
+}
+
+@test "malformed-avp-in-message-vendor-id-zero: V set with Vendor-Id 0 dropped by DiameterPopAVP" {
+	run_click malformed-avp-in-message-vendor-id-zero.click
+	# The offending AVP is the second in a two-AVP message, so the shared check
+	# must run at every offset, not only at the first AVP.
+	expect_drop DiameterPopAVP 'the V bit is set with a zero Vendor-Id'
+}
+
+@test "malformed-avp-in-message-pushavp-vendor-id-zero: the same AVP dropped by DiameterPushAVP" {
+	run_click malformed-avp-in-message-pushavp-vendor-id-zero.click
+	# DiameterPushAVP validates the message before appending, so it inherits the
+	# check without an edit of its own.
+	expect_drop DiameterPushAVP 'the V bit is set with a zero Vendor-Id'
+}
+
+@test "malformed-avp-in-message-popstorepush-vendor-id-zero: the same AVP dropped by DiameterPopStorePushAVP" {
+	run_click malformed-avp-in-message-popstorepush-vendor-id-zero.click
+	# The pop-store-push element walks the message with the same check and drops
+	# before storing, so neither output sees a packet.
+	expect_drop DiameterPopStorePushAVP 'the V bit is set with a zero Vendor-Id'
 }
 
 @test "malformed-zero-length-avp: DiameterPopAVP drops instead of hanging" {

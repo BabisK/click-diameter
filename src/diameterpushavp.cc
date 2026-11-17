@@ -7,6 +7,7 @@
 #include "diameterpushavp.hh"
 #include <click/args.hh>
 #include <click/confparse.hh>
+#include <click/error.hh>
 #include <click/glue.hh>
 CLICK_DECLS
 
@@ -76,7 +77,9 @@ int DiameterPushAVP::configure(Vector<String> &conf, ErrorHandler *errh)
 	// absent, so initialize it rather than read an indeterminate stack slot
 	// that decides whether the AVP gets a 12-octet vendor header.
 	bool vendorSpec = false;
-	uint32_t vendorId;
+	// Likewise initialize the Vendor-Id: an absent VENDOR must not leak a
+	// stack slot into the header, and must be rejected when VENDORSPEC is set.
+	uint32_t vendorId = 0;
 
 	if (Args(conf, this, errh)
 		.read_m("CODE", code)
@@ -91,6 +94,11 @@ int DiameterPushAVP::configure(Vector<String> &conf, ErrorHandler *errh)
 		.read("RANDHEXSTRING", randHexString)
 		.complete() < 0)
 		return -1;
+
+	// RFC 6733 section 4.1.1 forbids Vendor-Id zero with the V bit set, so an
+	// absent VENDOR and an explicit VENDOR 0 are the same refusal.
+	if (vendorSpec && vendorId == 0)
+		return errh->error("the VENDOR argument must be non-zero when VENDORSPEC is true (RFC 6733 section 4.1.1)");
 
 	ah.setCode(code);
 	ah.setMandatory(false);

@@ -27,6 +27,10 @@ padded to a 4-octet boundary with zero octets, and its own Length counts the
 header and the value but not that padding, per RFC 6733 section 4.1. The header
 is 8 octets, or 12 when VENDORSPEC is true.
 
+A vendor AVP must carry a non-zero Vendor-Id: VENDORSPEC true with VENDOR absent
+or zero fails configuration, because RFC 6733 section 4.1.1 forbids the value
+zero when the V bit is set.
+
 The message is validated before the append, so a malformed packet is dropped
 rather than rewritten: the element prints one
 C<DiameterPushAVP: dropping malformed packet: REASON> line when the packet is
@@ -58,8 +62,9 @@ Default is false.
 
 =item VENDOR
 
-Integer. Vendor-Id written into the vendor header. Used only when VENDORSPEC
-is true; otherwise the vendor id is 0.
+Integer. Required when VENDORSPEC is true and must be non-zero: the Vendor-Id
+written into the vendor header. When VENDORSPEC is false the vendor id is 0 and
+VENDOR is ignored.
 
 =item OCTETSTRING
 
