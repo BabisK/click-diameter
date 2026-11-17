@@ -16,12 +16,18 @@
 # rerun over a second later to reproduce the first run byte for byte, so a
 # clock-seeded stream fails. The rand-* tests pin the length and the alphabet of
 # each DiameterPushAVP generator. The push-avp-vendor* configs pin the V=1
-# header bytes and the refusal of a zero Vendor-Id. The avp-padding*
-# and avp-decap-* tests pin the 4-octet AVP alignment of RFC 6733 section 4.1
-# and the rule that the decoder derives padding from Length alone. The
-# malformed-* tests assert the drop path instead: exit 0, one warning naming the
-# element and reason, and no Print line. The four configs the package refuses --
-# ERROR on a request and RETRANSMITED on an answer in DiameterEncap, and
+# header bytes and the refusal of a zero Vendor-Id. The push-avp tests compare
+# whole frames -- literally, or as a pattern where a generated value cannot be
+# pinned -- so the existing expectations that cover the AVP header, and so omit
+# MANDATORY, pin M=0 as the regression half; push-avp-mandatory and
+# push-avp-mandatory-vendor pin M=1 alone and composed with V, and
+# push-avp-mandatory-false pins that an explicit false is M clear (the
+# randomness-* and malformed-* configs never cover the AVP header). The
+# avp-padding* and avp-decap-* tests pin the 4-octet AVP alignment of RFC 6733
+# section 4.1 and the rule that the decoder derives padding from Length alone.
+# The malformed-* tests assert the drop path instead: exit 0, one warning naming
+# the element and reason, and no Print line. The four configs the package refuses
+# -- ERROR on a request and RETRANSMITED on an answer in DiameterEncap, and
 # VENDORSPEC true without a non-zero VENDOR in DiameterPushAVP -- assert the
 # configure path: Click's whole configure-failure output and no Print line. The
 # smp-* tests are the ones run under `click -j 2`, with StaticThreadSched putting
@@ -182,6 +188,30 @@ expect_seeded() {
 	# The Vendor-Id is ignored without VENDORSPEC: the frame is the same 32
 	# octets as push-avp.click, with an 8-octet header and no V bit.
 	expect 'push-avp-vendor-unused:   32 | 01000020 80000118 00000000 00000001 00000002 00000108 0000000b 61626300'
+}
+
+@test "push-avp-mandatory: MANDATORY true sets the M bit, flags 40" {
+	run_click push-avp-mandatory.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# A-2: the same 32 octets as push-avp.click except that the AVP flags are
+	# 40 rather than 00. M is the only octet the argument may move.
+	expect 'push-avp-mandatory:   32 | 01000020 80000118 00000000 00000001 00000002 00000108 4000000b 61626300'
+}
+
+@test "push-avp-mandatory-vendor: M and V occupy separate bits, flags c0" {
+	run_click push-avp-mandatory-vendor.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# M is 0x40 and V is 0x80, so a mandatory vendor AVP carries c0 in its
+	# flags octet: 36 octets, AVP Length 0x0f, Vendor-Id 42.
+	expect 'push-avp-mandatory-vendor:   36 | 01000024 80000118 00000000 00000001 00000002 00000108 c000000f 0000002a 61626300'
+}
+
+@test "push-avp-mandatory-false: an explicit false keeps the M bit clear" {
+	run_click push-avp-mandatory-false.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# The argument's false value is M clear, not "argument present means set":
+	# the frame is byte-identical to push-avp.click.
+	expect 'push-avp-mandatory-false:   32 | 01000020 80000118 00000000 00000001 00000002 00000108 0000000b 61626300'
 }
 
 @test "rand-alphanum-one: one generated character, AVP Length 9" {

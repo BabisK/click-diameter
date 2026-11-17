@@ -175,7 +175,7 @@ Element reference
 | `DiameterRatedSource` | 0/1 | `CODE`, `REQUEST` (required); `RATE` (pps, default 10), `LIMIT`, `ACTIVE`, `APPID`, `STOP` | Emits bare 20-byte messages at a token-bucket rate; it never sets E, P or T, so a generated request carries R alone and a generated answer none |
 | `DiameterEncap` | 1/1 | `CODE`, `REQUEST` (required); `ERROR`, `PROXIABLE`, `RETRANSMITED`, `APPID` | Prepends a 20-byte Diameter header to the packet; accepts `PROXIABLE` on either type and rejects `ERROR` on a request and `RETRANSMITED` on an answer at configure time |
 | `DiameterDecap` | 1/1 | — | Strips the 20-byte header; validates the message first |
-| `DiameterPushAVP` | 1/1 | `CODE` (required); `VENDORSPEC`, `VENDOR`; one of `OCTETSTRING`, `UINT32`, `RANDUINT32`, `RANDALPHANUMSTRING N`, `RANDNUMSTRING N`, `RANDALPHASTRING N`, `RANDHEXSTRING N` | Appends an AVP and updates the message Length; validates the message first |
+| `DiameterPushAVP` | 1/1 | `CODE` (required); `VENDORSPEC`, `VENDOR`, `MANDATORY`; one of `OCTETSTRING`, `UINT32`, `RANDUINT32`, `RANDALPHANUMSTRING N`, `RANDNUMSTRING N`, `RANDALPHASTRING N`, `RANDHEXSTRING N` | Appends an AVP and updates the message Length; `MANDATORY` sets the AVP's M bit; validates the message first |
 | `DiameterPopAVP` | 1/1 | — | Removes the last AVP and updates the message Length; validates the message first |
 | `DiameterPopStorePushAVP` | 1/2 | — | Pops the last AVP from one packet (output 0) and pushes that value back onto the next (output 1); validates the message first |
 | `DiameterFlipRequest` | 1/1 | — | Toggles the request bit, turning a request into an answer and back; P is kept in both directions, T is cleared when it produces an answer and E when it produces a request |

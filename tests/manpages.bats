@@ -125,9 +125,9 @@ expect_element_page() {
 	expect_element_page DiameterEncap CODE REQUEST ERROR PROXIABLE RETRANSMITED APPID
 }
 
-@test "manpages: DiameterPushAVP documents its page and its ten arguments" {
-	expect_element_page DiameterPushAVP CODE VENDORSPEC VENDOR OCTETSTRING UINT32 \
-		RANDUINT32 RANDALPHANUMSTRING RANDNUMSTRING RANDALPHASTRING RANDHEXSTRING
+@test "manpages: DiameterPushAVP documents its page and its eleven arguments" {
+	expect_element_page DiameterPushAVP CODE VENDORSPEC VENDOR MANDATORY OCTETSTRING \
+		UINT32 RANDUINT32 RANDALPHANUMSTRING RANDNUMSTRING RANDALPHASTRING RANDHEXSTRING
 }
 
 @test "manpages: DiameterAvpEncap documents its page and its three arguments" {
