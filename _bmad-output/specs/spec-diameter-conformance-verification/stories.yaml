@@ -17,3 +17,19 @@
     fail, and the pre-change package must fail the first-frame and
     consecutiveness assertions. Build with `-Wall -Wextra` and run the whole
     bats suite.
+
+- id: "2"
+  title: Close the six deferred items
+  description: >-
+    Add the M=1 decode/re-encode and zero-draw observations, reject repeated
+    keyword arguments package-wide, add the missing three-octet Length guards to
+    DiameterEncap, DiameterPopStorePushAVP and DiameterAvpEncap, and cap the
+    RAND*STRING counts at configure time, closing DW-1 through DW-6.
+  invoke_dev_with: >-
+    Work on spec/diameter-rfc-conformance and keep the commit on it. DW-1 and
+    DW-3 are test-only; DW-2 is a deliberate behaviour change (a repeated
+    keyword now fails configuration, naming it); DW-4, DW-5 and DW-6 add the
+    run-time and configure-time ceilings. Keep the warnings in the
+    `ELEMENT: dropping packet: ...` style, keep the stored AVP on a
+    PopStorePush overflow, and pin every path with a config. Build with
+    `-Wall -Wextra` and run the whole bats suite.

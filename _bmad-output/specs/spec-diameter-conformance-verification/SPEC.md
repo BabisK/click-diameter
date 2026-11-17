@@ -10,7 +10,7 @@ sources: []
 
 ## Why
 
-A mandate to meet: the RFC 6733 conformance delivery (stories 3–9) is green, but its verification layer misreports the work. Two stories ship code while recording "no implementation was started"; the identifier test's equal-pair check compares numbers rather than identifiers; two acceptance claims — the padded `DiameterEncap` frame being walkable, and 37/30 equal identifiers on the baseline — are false; and the two subtlest invariants, the advance-on-emission counters and the seeded first frame, have no observer. Anyone auditing conformance from these artifacts is told the wrong thing, and the regressions those tests exist to catch would pass.
+A mandate to meet: the RFC 6733 conformance delivery (stories 3–9) is green, but its verification layer misreports the work. Two stories ship code while recording "no implementation was started"; the identifier test's equal-pair check compares numbers rather than identifiers; two acceptance claims — the padded `DiameterEncap` frame being walkable, and 37/30 equal identifiers on the baseline — are false; and the two subtlest invariants, the advance-on-emission counters and the seeded first frame, have no observer. The delivery also left a six-item deferred queue: two observation gaps, a silent repeated-keyword rule, and three unguarded three-octet fields plus an unbounded generator count. Anyone auditing conformance from these artifacts is told the wrong thing, and the regressions those tests and guards exist to catch would pass.
 
 ## Capabilities
 
@@ -26,6 +26,9 @@ A mandate to meet: the RFC 6733 conformance delivery (stories 3–9) is green, b
 - **CAP-4**
   - **intent:** Stories 6 and 9 and the deferred ledger tell the truth about the shipped tree.
   - **success:** Neither story says "planning only"; each carries an implementation record, a suite count measured at the reviewed tree, and a review triage; the ledger header no longer says "Presently empty", no entry is truncated, and every location resolves.
+- **CAP-5**
+  - **intent:** The six deferred items are closed: an M=1 AVP and a zero `RANDUINT32` draw are observed, a repeated keyword is refused package-wide, and the Encap, PopStorePush and AvpEncap three-octet ceilings and the `RAND*STRING` cap are enforced.
+  - **success:** The pre-change package shows the wrapped Lengths, the last-wins keyword and the late generator drop; the fixed package drops or refuses each at its configured point; the full suite passes with the new configs.
 
 ## Constraints
 
@@ -34,21 +37,21 @@ A mandate to meet: the RFC 6733 conformance delivery (stories 3–9) is green, b
 - No wire-format change. The only behaviour change is the allocation-failure null check; `DiameterEncap`'s padding stays because `SPEC-diameter-rfc-conformance` CAP-2 pins it.
 - The man-page phrases `seeded once from click_random()` and `unique for the first 2^32 messages of a run` stay, because `tests/manpages.bats` asserts them.
 - Tabs for indentation; warning-free at `-Wall -Wextra`; the full bats suite green.
-- DW-4, DW-5 and DW-6 (the Encap and PopStorePush Length ceilings, the AvpEncap AVP Length, the unbounded `RAND*STRING` counts) are not fixed here.
+- A repeated keyword fails configuration naming it (the user's resolution for DW-2); a `RAND*STRING` count is capped at 16,777,184 (16,777,180 with the vendor header); a PopStorePush overflow keeps the stored AVP.
 
 ## Non-goals
 
 - No change to the padding decision or the three `encap-padding*` configs' bytes.
 - No new element, argument, RNG or CI job.
 - No rewrite of `SPEC-diameter-rfc-conformance`'s capabilities; only its success-signal exception and a recorded change.
-- No fix for the deferred Length ceilings.
 - No load test beyond 2^20 + 1 messages.
 
 ## Success signal
 
-`bats --tap tests` exits 0 with the new configs and assertions; the advance-on-refusal and seed+1 mutants fail their checks; the pre-change package fails the first-frame and consecutiveness assertions; and no story, README, man page or ledger entry contradicts the tree.
+`bats --tap tests` exits 0 with the new configs and assertions; the advance-on-refusal and seed+1 mutants fail their checks; the pre-change package fails the first-frame and consecutiveness assertions; the six deferred configs fail on the pre-change package (wrapped Lengths, last-wins keyword, late generator drop) and pass or refuse on the fixed one; and no story, README, man page or ledger entry contradicts the tree.
 
 ## Assumptions
 
 - Click's RNG with `RandomSeed(SEED 12345)` is stable on the CI image, so literal identifier bytes are a legitimate pin (user direction).
+- Click's first glibc `random()` draw for `RandomSeed(SEED 808357014)` is zero, so that seed pins the zero `RANDUINT32` draw.
 - The padded body that is not an AVP sequence is an accepted limitation, documented and pinned by a drop config, rather than a reason to reopen the padding decision.

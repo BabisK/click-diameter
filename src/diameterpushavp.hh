@@ -45,15 +45,20 @@ exceed the three-octet Length field (RFC 6733 section 3)>, and nothing is
 forwarded. That decision is made per packet, because the value decides the
 final length; the message itself is well formed, so the line does not report
 malformed input. A message whose appended total stays at or below 0xFFFFFF is
-appended as usual.
+appended as usual. A RAND*STRING count is capped at 16,777,184 (16,777,180 with
+the vendor header): a longer value cannot fit the three-octet message Length
+even in a 20-octet message, so it fails configuration instead of being
+materialised and dropped on every packet.
 
 At most one value source may supply the value: a configuration that supplies
 two of OCTETSTRING, UINT32, RANDUINT32, RANDALPHANUMSTRING, RANDNUMSTRING,
 RANDALPHASTRING and RANDHEXSTRING fails configuration with an error naming the
 first conflicting pair in that documented argument order, because resolving the
 pair by precedence would silently discard the argument that decides the encoded
-value type. A repeated keyword is not two sources: Click's argument parsing
-takes the last occurrence, as it does for every argument. Each source counts as
+value type. A repeated keyword fails configuration too, with an error naming it
+(C<the OCTETSTRING argument is given more than once>), because Click's parser
+would otherwise keep the last occurrence and silently discard the earlier value.
+Each source counts as
 supplied on its own terms: OCTETSTRING and UINT32 when the keyword is present --
 an empty string and a zero number are values, not absences -- RANDUINT32 only
 when true, and a RAND*STRING generator only when its count is above zero, the
@@ -126,25 +131,30 @@ RFC 6733 section 4.2. Default is false, which supplies nothing.
 
 Integer. Generates that many characters from C<0>-C<9>, C<A>-C<Z> and
 C<a>-C<z>. Cannot be combined with any other value source: supplying a second
-one fails configuration. Zero means unused, which is the default.
+one fails configuration. Zero means unused, which is the default. At most
+16,777,184 (16,777,180 with the vendor header); a larger count fails
+configuration because the AVP cannot fit the three-octet message Length.
 
 =item RANDNUMSTRING
 
 Integer. Generates that many characters from C<0>-C<9>. Cannot be combined with
 any other value source: supplying a second one fails configuration. Zero means
-unused, which is the default.
+unused, which is the default. At most 16,777,184 (16,777,180 with the vendor
+header); a larger count fails configuration.
 
 =item RANDALPHASTRING
 
 Integer. Generates that many characters from C<A>-C<Z> and C<a>-C<z>. Cannot be
 combined with any other value source: supplying a second one fails
-configuration. Zero means unused, which is the default.
+configuration. Zero means unused, which is the default. At most 16,777,184
+(16,777,180 with the vendor header); a larger count fails configuration.
 
 =item RANDHEXSTRING
 
 Integer. Generates that many characters from C<0>-C<9> and C<A>-C<F>. Cannot be
 combined with any other value source: supplying a second one fails
-configuration. Zero means unused, which is the default.
+configuration. Zero means unused, which is the default. At most 16,777,184
+(16,777,180 with the vendor header); a larger count fails configuration.
 
 =back
 

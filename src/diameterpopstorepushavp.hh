@@ -41,7 +41,11 @@ Version field is not 1, when the packet is shorter than the 20-octet header,
 when its Length field is not a multiple of 4, when its Length field does not
 equal the packet length, when the flags are illegal for the message type, or
 when an AVP in it is malformed or runs past the message end. A drop sends
-nothing to either output and leaves the store as it was. The element takes no
+nothing to either output and leaves the store as it was. The Message Length is
+three octets, so when the stored AVP would push a message past 0xFFFFFF the
+packet is dropped with C<DiameterPopStorePushAVP: dropping packet: pushing the
+stored AVP would exceed the three-octet Length field (RFC 6733 section 3)>, and
+the stored AVP is kept so a later packet can carry it. The element takes no
 arguments.
 
 =a

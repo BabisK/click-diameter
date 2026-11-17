@@ -219,7 +219,7 @@ non-zero exit, Click's whole configure-failure output for that config (path and
 line, the `While configuring 'ELEMENT@N :: ELEMENT':` line, the named error, and
 `Router could not be initialized!`), and no `Print` line. The element is a
 parameter because more than one element refuses a configuration, and the `@N`
-suffix is matched with a wildcard rather than pinned. Fourteen configs take that
+suffix is matched with a wildcard rather than pinned. Nineteen configs take that
 path: `encap-error-on-request.click`, `encap-retransmit-on-answer.click`,
 `encap-code-too-large.click`, `encap-code-first-too-large.click`,
 `rated-source-code-too-large.click`,
@@ -229,21 +229,28 @@ path: `encap-error-on-request.click`, `encap-retransmit-on-answer.click`,
 `push-avp-conflict-randnumstring-randhexstring.click`,
 `push-avp-conflict-empty-octetstring-uint32.click`,
 `push-avp-conflict-octetstring-randuint32.click`,
-`push-avp-conflict-randalphanumstring-randalphastring.click` and
-`push-avp-conflict-three.click`. The four CODE-range configs refuse a `CODE`
-above `0xFFFFFF` in the two writers -- both the `0x01000118` repro value and
-the first illegal value `0x1000000` -- because RFC 6733 §3 sizes the
+`push-avp-conflict-randalphanumstring-randalphastring.click`,
+`push-avp-conflict-three.click`, `encap-duplicate-code.click`,
+`rated-source-duplicate-rate.click`, `push-avp-duplicate-octetstring.click`,
+`push-avp-randhex-too-large.click` and
+`push-avp-randhex-too-large-vendor.click`. The four CODE-range configs refuse a
+`CODE` above `0xFFFFFF` in the two writers -- both the `0x01000118` repro value
+and the first illegal value `0x1000000` -- because RFC 6733 §3 sizes the
 Command Code at three octets, so `0x01000118` would silently go out as
 `0x000118`. The six conflict configs refuse more than one
 value source in one `DiameterPushAVP`, which accepts at most one, and the
 three-source one also pins that the error names the first conflicting pair in
-documented argument order;
-`push-avp-rand-zero.click`, `push-avp-randuint32-false.click` and
-`push-avp-duplicate-octetstring.click` pin the other side of that rule: a zero
-generator count and a false `RANDUINT32` supply nothing, and a repeated keyword
-is Click's last-wins rather than two sources, so each configuration prints
-bytes. Every other `encap-*`, `rated-source*` and `push-avp*` config configures
-and prints bytes or the one drop line its own row names.
+documented argument order. The three duplicate-keyword configs refuse a keyword
+given twice, naming it, in `DiameterEncap`'s keyword-only shape,
+`DiameterRatedSource`'s positional-plus-keyword shape, and `DiameterPushAVP`.
+The two generator-cap configs refuse a `RANDHEXSTRING` count one past the
+16,777,184-octet body limit (16,777,180 with the vendor header), so the value
+is never materialised.
+`push-avp-rand-zero.click` and `push-avp-randuint32-false.click` pin the other
+side of the one-source rule: a zero generator count and a false `RANDUINT32`
+supply nothing, so each configuration prints bytes. Every other `encap-*`,
+`rated-source*` and `push-avp*` config configures and prints bytes or the one
+drop line its own row names.
 
 CI runs the same command on every pull request and every push to `master`, plus
 monthly against the latest Click master, so a local pass over the same Click is
@@ -278,9 +285,14 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `push-avp-no-value.click` | no value source at all (including a lone zero generator count or `RANDUINT32 false`): AVP Length 8, 28 octets (A-3, RFC 6733 §4.2) |
 | `push-avp-uint32.click` | `UINT32 2001` is the four-octet big-endian value `000007d1`: AVP Length 12, 32 octets |
 | `push-avp-randuint32-false.click` | `RANDUINT32 false` supplies nothing, so `OCTETSTRING` is the single source: byte-identical to `push-avp.click` (A-10) |
+| `push-avp-randuint32-zero.click` | `RandomSeed(SEED 808357014)` makes Click's first draw zero: `RANDUINT32` is four zero octets at AVP Length 12 |
 | `push-avp-rand-zero.click` | `RANDNUMSTRING 0` is unused, not a second source: `RANDHEXSTRING 4` supplies four hex characters at AVP Length 12 (A-10) |
-| `push-avp-duplicate-octetstring.click` | a repeated `OCTETSTRING` is Click's last-wins, not a second source: the value is `bc` at AVP Length 10 (A-10) |
-| `push-avp-length-overflow.click` | an append that would make 16,777,216 octets is dropped with its own warning instead of wrapping Length to `000000` (A-9, RFC 6733 §3) |
+| `push-avp-duplicate-octetstring.click` | a repeated `OCTETSTRING` fails configuration naming the argument instead of keeping the last value (DW-2) |
+| `encap-duplicate-code.click` | a repeated `CODE` fails configuration naming the argument (DW-2) |
+| `rated-source-duplicate-rate.click` | a repeated `RATE` after the positional shape fails configuration naming the argument (DW-2) |
+| `push-avp-randhex-too-large.click` | `RANDHEXSTRING 16777185` is past the 16,777,184-octet body limit and fails configuration (DW-6) |
+| `push-avp-randhex-too-large-vendor.click` | the vendor header lowers the generator limit to 16,777,180, so 16,777,181 fails configuration (DW-6) |
+| `push-avp-length-overflow.click` | a maximal 16,777,212-octet message plus an 8-octet AVP is dropped with its own warning instead of wrapping Length (A-9, RFC 6733 §3) |
 | `push-avp-length-max.click` | the largest legal message, 16,777,212 octets with message Length `0xfffffc` and AVP Length `0xffffe8`, still appends: the guard is not over-broad (A-9) |
 | `push-avp-rand.click` | generated value, 8 characters |
 | `rand-alphanum-one.click` | `RANDALPHANUMSTRING 1` emits one character: AVP Length 9 and three zero pad octets (F-8) |
@@ -297,6 +309,7 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `avp-padding-two.click` | a 2-octet value pads to 12 octets with two zero octets |
 | `avp-padding-one.click` | a 3-octet value pads to 12 octets with one zero octet |
 | `avp-padding-none.click` | a 4-octet value needs no padding: 12 octets |
+| `avp-encap-length-overflow.click` | a 16,777,210-octet value would wrap the three-octet AVP Length, so the envelope is dropped with its own warning (DW-5) |
 | `avp-padding-empty.click` | an empty value is an 8-octet AVP with no padding |
 | `avp-padding-vendor.click` | the 12-octet vendor header plus a 5-octet value pads to 20 octets |
 | `avp-two-decode.click` | two consecutive padded AVPs decode at the right offsets |
@@ -320,6 +333,7 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `encap-padding-two.click` | a 6-octet payload gains two zero pad octets: 28 octets, Length `0x1c` (A-4, RFC 6733 §3) |
 | `encap-padding-one.click` | a 7-octet payload gains one zero pad octet: 28 octets, Length `0x1c` (A-4, RFC 6733 §3) |
 | `encap-padding-push-avp.click` | the padded body is not an AVP sequence: `DiameterPushAVP` drops it with `AVP length below its header`, so padding fixes the header rule only (V-8) |
+| `encap-length-overflow.click` | a 16,777,200-octet payload padded into a message past `0xFFFFFF` is dropped with its own warning instead of wrapping the Length (DW-4) |
 | `encap-push-pop.click` | Encap then PushAVP grows a 28-octet frame to 44 and PopAVP restores 28 (F-4) |
 | `encap-error-on-answer.click` | E on an answer is legal and unchecked: flags `20` |
 | `encap-retransmit-on-request.click` | T on a request is not checked: flags `90` |
@@ -345,6 +359,8 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `identifiers-encap-wrap.click` | 1 048 577 messages through `DiameterEncap` under `--simtime`: crosses the 2^20 end-to-end carry once, and the fields stay distinct and consecutive |
 | `randomness-encap-push-avp.click` | `RandomSeed(SEED 12345)` with `DiameterEncap` chained into `DiameterPushAVP(RANDHEXSTRING 8)`: pins the stream position a seeded writer leaves for a downstream generator |
 | `popstorepush-roundtrip.click` | popping an unpadded AVP and pushing it back restores the 44-octet message (F-1) |
+| `popstorepush-mandatory.click` | an AVP with flags `40` survives the element's decode and re-encode: the second output carries it again with M set (DW-1) |
+| `popstorepush-length-overflow.click` | a maximal message plus the stored maximal AVP would reach 33,554,404 octets, so the packet is dropped and the AVP kept (DW-4) |
 | `no-avp.click` | a header-only message forwarded unchanged by both pop elements |
 | `malformed-version-decap.click` | a 20-octet Version 2 request dropped by `DiameterDecap`, no payload forwarded (A-5, RFC 6733 §3) |
 | `malformed-version-pushavp.click` | the same frame dropped by `DiameterPushAVP` rather than appended to (A-5) |
