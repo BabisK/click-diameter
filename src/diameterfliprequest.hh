@@ -33,11 +33,11 @@ accepted nonconforming frame come back zero.
 
 The header is validated before the flip, so a malformed packet is dropped
 rather than repaired: the element prints one
-C<DiameterFlipRequest: dropping malformed packet: REASON> line when the packet
-is shorter than the 20-octet header, when its Length field does not equal the
-packet length, when the E bit is set on a request, or when the T bit is set on
-an answer. P on either type and T on a request are not errors. The element
-takes no arguments.
+C<DiameterFlipRequest: dropping malformed packet: REASON> line when the Version
+field is not 1, when the packet is shorter than the 20-octet header, when its
+Length field does not equal the packet length, when the E bit is set on a
+request, or when the T bit is set on an answer. P on either type and T on a
+request are not errors. The element takes no arguments.
 
 =a
 

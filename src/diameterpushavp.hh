@@ -33,10 +33,11 @@ zero when the V bit is set.
 
 The message is validated before the append, so a malformed packet is dropped
 rather than rewritten: the element prints one
-C<DiameterPushAVP: dropping malformed packet: REASON> line when the packet is
-shorter than the 20-octet header, when its Length field does not equal the
-packet length, when an AVP in it is malformed or runs past the message end, or
-when the flags are illegal for the message type.
+C<DiameterPushAVP: dropping malformed packet: REASON> line when the Version
+field is not 1, when the packet is shorter than the 20-octet header, when its
+Length field does not equal the packet length, when an AVP in it is malformed
+or runs past the message end, or when the flags are illegal for the message
+type.
 
 At most one value source may supply the value: a configuration that supplies
 two of OCTETSTRING, UINT32, RANDUINT32, RANDALPHANUMSTRING, RANDNUMSTRING,

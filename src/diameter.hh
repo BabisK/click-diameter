@@ -277,6 +277,7 @@ public:
 // click_chatter line with the matching reason.
 enum DiameterCheck {
 	DIAMETER_CHECK_OK = 0,
+	DIAMETER_CHECK_BAD_VERSION,
 	DIAMETER_CHECK_SHORT_MESSAGE_HEADER,
 	DIAMETER_CHECK_SHORT_AVP_HEADER,
 	DIAMETER_CHECK_SHORT_VENDOR_AVP_HEADER,
@@ -293,6 +294,8 @@ inline const char *diameter_check_reason(DiameterCheck check)
 	switch (check) {
 	case DIAMETER_CHECK_OK:
 		return "no error";
+	case DIAMETER_CHECK_BAD_VERSION:
+		return "the Version field is not 1";
 	case DIAMETER_CHECK_SHORT_MESSAGE_HEADER:
 		return "packet shorter than the 20-octet Diameter header";
 	case DIAMETER_CHECK_SHORT_AVP_HEADER:
@@ -315,11 +318,20 @@ inline const char *diameter_check_reason(DiameterCheck check)
 	return "unknown validation error";
 }
 
-// Checks whether buffer[0..length) holds a whole 20-octet Diameter header whose
-// Length field equals length and whose flags are legal for its message type.
-// Elements that only touch the header stop here.
+// Checks the Diameter header at buffer[0..length): the Version is tested first,
+// whenever at least one octet is present, so a frame that disagrees is reported
+// as such before the whole-header or Length check; the rest of the checks
+// require a whole 20-octet header whose Length field equals length and whose
+// flags are legal for its message type. Elements that only touch the header stop
+// here.
 inline DiameterCheck diameter_check_header(const uint8_t *buffer, uint32_t length)
 {
+	// RFC 6733 section 3 fixes the Version at 1, so a frame that disagrees is
+	// not a Diameter message at any length. Testing it first keeps the Version
+	// reason ahead of a Length or framing fault; the length guard keeps a
+	// zero-octet packet from being read out of bounds.
+	if (length >= 1 && buffer[0] != 1)
+		return DIAMETER_CHECK_BAD_VERSION;
 	if (length < DIAMETER_MESSAGE_HEADER_LENGTH)
 		return DIAMETER_CHECK_SHORT_MESSAGE_HEADER;
 	const uint32_t declared = ((uint32_t) buffer[1] << 16)
@@ -373,11 +385,11 @@ inline DiameterCheck diameter_check_avp(const uint8_t *buffer, uint32_t length,
 }
 
 // Checks whether buffer[0..length) holds exactly one well-formed Diameter
-// message: a whole 20-octet header whose Length field equals length, then a run
-// of AVPs that each pass diameter_check_avp() and whose padded lengths stay
-// inside the message, so the walk always advances. On success
-// *last_avp_offset is the offset of the final AVP, or 0 when the message has
-// none; pass 0 when the caller does not need it.
+// message: a header that passes diameter_check_header() -- Version 1, a Length
+// field equal to length, and legal flags -- then a run of AVPs that each pass
+// diameter_check_avp() and whose padded lengths stay inside the message, so the
+// walk always advances. On success *last_avp_offset is the offset of the final
+// AVP, or 0 when the message has none; pass 0 when the caller does not need it.
 inline DiameterCheck diameter_check_message(const uint8_t *buffer,
 		uint32_t length, uint32_t *last_avp_offset)
 {

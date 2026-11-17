@@ -160,8 +160,11 @@ Malformed input is dropped, never forwarded. A drop is asserted with
 malformed packet or a silent drop fails the run. Drops are not throttled, so
 a hostile source can flood the log; that is accepted.
 
-Received frames are validated for flags as well as framing: RFC 6733 §3 forbids
-E in a request and T in an answer, so a frame with either is dropped with
+Received messages are validated for framing and flags: RFC 6733 §3 fixes the
+Version at 1, so a message whose first octet is not 1 is dropped with
+`the Version field is not 1` before its Length is compared; an AVP has no
+Version field, so `DiameterAvpDecap` is exempt. Section 3 also forbids E in a
+request and T in an answer, so a frame with either is dropped with
 `the E bit is set on a request` or `the T bit is set on an answer`. P is legal
 on either message type, so it never causes a drop. The same walk rejects a
 vendor AVP whose `V` bit is set with a zero Vendor-Id, per RFC 6733 §4.1.1, and
@@ -277,6 +280,14 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `randomness-rated-source-pull.click` | `RandomSeed(SEED 12345)` with `Unqueue` forcing `DiameterRatedSource`'s pull path: two 20-octet frames, reproduced across runs, identifiers differ (F-11) |
 | `popstorepush-roundtrip.click` | popping an unpadded AVP and pushing it back restores the 44-octet message (F-1) |
 | `no-avp.click` | a header-only message forwarded unchanged by both pop elements |
+| `malformed-version-decap.click` | a 20-octet Version 2 request dropped by `DiameterDecap`, no payload forwarded (A-5, RFC 6733 §3) |
+| `malformed-version-pushavp.click` | the same frame dropped by `DiameterPushAVP` rather than appended to (A-5) |
+| `malformed-version-popavp.click` | the same frame dropped by `DiameterPopAVP` (A-5) |
+| `malformed-version-popstorepush.click` | the same frame dropped by `DiameterPopStorePushAVP`, nothing stored (A-5) |
+| `malformed-version-flip-request.click` | the same frame dropped by `DiameterFlipRequest` rather than re-encoded (A-5) |
+| `malformed-version-length.click` | Version 2 and Length 100 on one frame: the Version reason wins (A-5) |
+| `malformed-version-short.click` | a 3-octet frame starting `02`: the Version reason wins over the short-header reason (A-5) |
+| `malformed-empty-packet.click` | a zero-octet packet: the one-octet guard reports the short header instead of reading a Version (A-5) |
 | `malformed-short-packet.click` | a 4-octet packet dropped by `DiameterDecap` (F-6) |
 | `malformed-avpdecap-short.click` | a 6-octet packet dropped by `DiameterAvpDecap` (F-6) |
 | `malformed-avpdecap-v-short.click` | an 8-octet `V` AVP dropped by `DiameterAvpDecap` (F-6) |
@@ -313,8 +324,13 @@ zero octets and the AVP Length excludes that padding (RFC 6733 §4.1); the
 that, so a regression to an unpadded AVP fails the run. The drop tests are the
 exception: they assert no forwarded bytes at all, only the one warning line, so
 a silent drop or a forwarded malformed packet fails. A frame that carries both a
-bad Length and a prohibited flag reports the Length reason, because the flag
-test runs only once the Length matches. `encap-error-on-request`,
+bad Version and a bad Length, or a bad Version and a truncated header, reports
+the Version reason, because the Version test runs before the Length comparison
+and the short-header guard; a one-octet guard keeps the Version test from reading
+an empty buffer, so a zero-octet packet still reports the short header. A frame
+that carries both a bad Length
+and a prohibited flag reports the Length reason, because the flag test runs only
+once the Length matches. `encap-error-on-request`,
 `encap-retransmit-on-answer`, `push-avp-vendor-missing` and
 `push-avp-vendor-zero` assert the configure path instead: a non-zero exit,
 Click's whole configure-failure output with the named argument, and no `Print`

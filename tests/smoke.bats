@@ -30,13 +30,15 @@
 # avp-padding* and avp-decap-* tests pin the 4-octet AVP alignment of RFC 6733
 # section 4.1 and the rule that the decoder derives padding from Length alone.
 # The malformed-* tests assert the drop path instead: exit 0, one warning naming
-# the element and reason, and no Print line. The ten configs the package
-# refuses -- ERROR on a request and RETRANSMITED on an answer in DiameterEncap,
-# VENDORSPEC true without a non-zero VENDOR in DiameterPushAVP, and two value
-# sources in one DiameterPushAVP -- assert the configure path: Click's whole
-# configure-failure output and no Print line. push-avp-conflict-three pins that
-# the error names the first conflicting pair in documented argument order rather
-# than a later pair. push-avp-rand-zero and
+# the element and reason, and no Print line. They cover a bad Version, a short
+# packet, a Length mismatch, an over-long or malformed AVP, a V bit with a zero
+# Vendor-Id, and an illegal flag.
+# The ten configs the package refuses -- ERROR on a request and RETRANSMITED on
+# an answer in DiameterEncap, VENDORSPEC true without a non-zero VENDOR in
+# DiameterPushAVP, and two value sources in one DiameterPushAVP -- assert the
+# configure path: Click's whole configure-failure output and no Print line.
+# push-avp-conflict-three pins that the error names the first conflicting pair
+# in documented argument order rather than a later pair. push-avp-rand-zero and
 # push-avp-randuint32-false pin the other side of the one-source rule: a zero
 # generator count and a false RANDUINT32 are not sources, so each configures and
 # prints a frame, and push-avp-duplicate-octetstring pins that a repeated
@@ -776,6 +778,56 @@ pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
 	run_click popstorepush-roundtrip.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
 	expect $'out0:   32 | 01000020 80000118 00000000 00000001 00000002 00000108 0000000a 61620000\nout1:   44 | 0100002c 80000118 00000000 00000001 00000002 00000108 0000000a 61620000 0000010c 0000000a 78790000'
+}
+
+@test "malformed-version-decap: Version 2 dropped by DiameterDecap, no payload forwarded" {
+	run_click malformed-version-decap.click
+	# A-5: RFC 6733 section 3 fixes the Version at 1.
+	expect_drop DiameterDecap 'the Version field is not 1'
+}
+
+@test "malformed-version-pushavp: Version 2 dropped by DiameterPushAVP" {
+	run_click malformed-version-pushavp.click
+	# The frame is not appended to and re-emitted with its bogus Version.
+	expect_drop DiameterPushAVP 'the Version field is not 1'
+}
+
+@test "malformed-version-popavp: Version 2 dropped by DiameterPopAVP" {
+	run_click malformed-version-popavp.click
+	expect_drop DiameterPopAVP 'the Version field is not 1'
+}
+
+@test "malformed-version-popstorepush: Version 2 dropped by DiameterPopStorePushAVP" {
+	run_click malformed-version-popstorepush.click
+	# Neither output sees a packet.
+	expect_drop DiameterPopStorePushAVP 'the Version field is not 1'
+}
+
+@test "malformed-version-flip-request: Version 2 dropped by DiameterFlipRequest" {
+	run_click malformed-version-flip-request.click
+	expect_drop DiameterFlipRequest 'the Version field is not 1'
+}
+
+@test "malformed-version-length: the Version reason wins over the Length reason" {
+	run_click malformed-version-length.click
+	# The version test runs before the Length comparison, so a frame with both
+	# faults reports the Version reason. Moving it after the Length check fails
+	# here.
+	expect_drop DiameterDecap 'the Version field is not 1'
+}
+
+@test "malformed-version-short: the Version reason wins over the short-header reason" {
+	run_click malformed-version-short.click
+	# A 3-octet frame with first octet 02. The version test runs before the
+	# short-header guard, so moving it below that guard fails here.
+	expect_drop DiameterDecap 'the Version field is not 1'
+}
+
+@test "malformed-empty-packet: a zero-octet packet reports the short header" {
+	run_click malformed-empty-packet.click
+	# The one-octet guard keeps the Version test from reading past an empty
+	# buffer; without it this packet would report a bad Version.
+	expect_drop DiameterDecap 'packet shorter than the 20-octet Diameter header'
 }
 
 @test "malformed-short-packet: 4-octet packet dropped by DiameterDecap" {
