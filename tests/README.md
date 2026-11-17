@@ -163,14 +163,21 @@ a hostile source can flood the log; that is accepted.
 Received frames are validated for flags as well as framing: RFC 6733 §3 forbids
 E in a request and T in an answer, so a frame with either is dropped with
 `the E bit is set on a request` or `the T bit is set on an answer`. P is legal
-on either message type, so it never causes a drop.
+on either message type, so it never causes a drop. The same walk rejects a
+vendor AVP whose `V` bit is set with a zero Vendor-Id, per RFC 6733 §4.1.1, and
+drops it with `the V bit is set with a zero Vendor-Id`; every AVP walker
+inherits that check, and the Length checks keep precedence over it.
 
 A configuration the package refuses is asserted with `expect_configure_failure`,
-which requires a non-zero exit, Click's whole configure-failure output for that
-config (path and line, the `While configuring` line, the named error, and
-`Router could not be initialized!`), and no `Print` line. Only
-`encap-error-on-request.click` and `encap-retransmit-on-answer.click` take that
-path; every other `encap-*` config configures and prints bytes.
+which takes the config, the refusing element and the named message; it requires a
+non-zero exit, Click's whole configure-failure output for that config (path and
+line, the `While configuring 'ELEMENT@N :: ELEMENT':` line, the named error, and
+`Router could not be initialized!`), and no `Print` line. The element is a
+parameter because more than one element refuses a configuration, and the `@N`
+suffix is matched with a wildcard rather than pinned. Four configs take that
+path: `encap-error-on-request.click`, `encap-retransmit-on-answer.click`,
+`push-avp-vendor-missing.click` and `push-avp-vendor-zero.click`; every other
+`encap-*` and `push-avp*` config configures and prints bytes.
 
 CI runs the same command on every pull request and every push to `master`, plus
 monthly against the latest Click master, so a local pass over the same Click is
@@ -185,6 +192,10 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | Config | Covers |
 |---|---|
 | `push-avp.click` | appending an AVP, header length updated |
+| `push-avp-vendor.click` | a vendor AVP carries V, AVP Length 15 and Vendor-Id 42: 36 octets in total (RFC 6733 §4.1.1) |
+| `push-avp-vendor-missing.click` | `VENDORSPEC true` without `VENDOR` rejected at configure time (A-1, RFC 6733 §4.1.1) |
+| `push-avp-vendor-zero.click` | `VENDORSPEC true, VENDOR 0` rejected at configure time (RFC 6733 §4.1.1) |
+| `push-avp-vendor-unused.click` | `VENDOR 42` without `VENDORSPEC` is ignored: the AVP keeps the 8-octet non-vendor header |
 | `push-avp-rand.click` | generated value, 8 characters |
 | `rand-alphanum-one.click` | `RANDALPHANUMSTRING 1` emits one character: AVP Length 9 and three zero pad octets (F-8) |
 | `rand-hex-one.click` | `RANDHEXSTRING 1` emits one character rather than an empty AVP (F-8) |
@@ -238,6 +249,11 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `malformed-short-packet.click` | a 4-octet packet dropped by `DiameterDecap` (F-6) |
 | `malformed-avpdecap-short.click` | a 6-octet packet dropped by `DiameterAvpDecap` (F-6) |
 | `malformed-avpdecap-v-short.click` | an 8-octet `V` AVP dropped by `DiameterAvpDecap` (F-6) |
+| `malformed-avpdecap-vendor-id-zero.click` | a 12-octet `V` AVP with Vendor-Id 0 dropped by `DiameterAvpDecap` (A-6, RFC 6733 §4.1.1) |
+| `malformed-avpdecap-vendor-id-zero-length.click` | a zero Vendor-Id AVP whose Length is below its header reports the Length reason first |
+| `malformed-avp-in-message-vendor-id-zero.click` | the same AVP inside a message dropped by `DiameterPopAVP` (A-6) |
+| `malformed-avp-in-message-pushavp-vendor-id-zero.click` | the same AVP inside a message dropped by `DiameterPushAVP` (A-6) |
+| `malformed-avp-in-message-popstorepush-vendor-id-zero.click` | the same AVP inside a message dropped by `DiameterPopStorePushAVP` (A-6) |
 | `malformed-zero-length-avp.click` | a zero-length AVP dropped by `DiameterPopAVP`, no hang (F-2) |
 | `malformed-avp-short-length.click` | an AVP length below its header dropped by `DiameterPopAVP` |
 | `malformed-avp-past-message.click` | an AVP past the message end dropped by `DiameterPopAVP` |
@@ -267,10 +283,15 @@ that, so a regression to an unpadded AVP fails the run. The drop tests are the
 exception: they assert no forwarded bytes at all, only the one warning line, so
 a silent drop or a forwarded malformed packet fails. A frame that carries both a
 bad Length and a prohibited flag reports the Length reason, because the flag
-test runs only once the Length matches. `encap-error-on-request` and
-`encap-retransmit-on-answer` assert the configure path instead: a non-zero exit,
+test runs only once the Length matches. `encap-error-on-request`,
+`encap-retransmit-on-answer`, `push-avp-vendor-missing` and
+`push-avp-vendor-zero` assert the configure path instead: a non-zero exit,
 Click's whole configure-failure output with the named argument, and no `Print`
-line, so an element that accepts the pair fails the run.
+line, so an element that accepts the pair or writes a zero Vendor-Id fails the
+run. The two `*-vendor-id-zero` configs assert the receive side of the same rule:
+`V` set with Vendor-Id 0 is dropped by `DiameterAvpDecap` for one AVP and by
+`DiameterPopAVP` inside a message, with the reason `the V bit is set with a zero
+Vendor-Id`.
 
 ## Flag policy
 

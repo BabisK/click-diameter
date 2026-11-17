@@ -283,6 +283,7 @@ enum DiameterCheck {
 	DIAMETER_CHECK_LENGTH_MISMATCH,
 	DIAMETER_CHECK_AVP_BELOW_HEADER,
 	DIAMETER_CHECK_AVP_PAST_END,
+	DIAMETER_CHECK_VENDOR_ID_ZERO,
 	DIAMETER_CHECK_ERROR_ON_REQUEST,
 	DIAMETER_CHECK_RETRANSMITTED_ON_ANSWER
 };
@@ -304,6 +305,8 @@ inline const char *diameter_check_reason(DiameterCheck check)
 		return "AVP length below its header";
 	case DIAMETER_CHECK_AVP_PAST_END:
 		return "AVP extends past the message end";
+	case DIAMETER_CHECK_VENDOR_ID_ZERO:
+		return "the V bit is set with a zero Vendor-Id";
 	case DIAMETER_CHECK_ERROR_ON_REQUEST:
 		return "the E bit is set on a request";
 	case DIAMETER_CHECK_RETRANSMITTED_ON_ANSWER:
@@ -336,12 +339,13 @@ inline DiameterCheck diameter_check_header(const uint8_t *buffer, uint32_t lengt
 
 // Checks one AVP at buffer[0..length): the V bit decides whether its header is
 // 8 or 12 octets, the header must fit, and the declared length must be at least
-// that header and at most the octets available. Padding is not required here: a
-// standalone AVP may legitimately arrive without its zero pad, because the pad
-// belongs to the message a receiver walks, not to the AVP's own Length. The
-// decoder strips only what Length says, and the message walk applies its own
-// padded bound. On success *header_length is the header size and *avp_length
-// the declared length.
+// that header and at most the octets available. A 12-octet vendor header must
+// also carry a non-zero Vendor-Id, which RFC 6733 section 4.1.1 requires when V
+// is set. Padding is not required here: a standalone AVP may legitimately
+// arrive without its zero pad, because the pad belongs to the message a
+// receiver walks, not to the AVP's own Length. The decoder strips only what
+// Length says, and the message walk applies its own padded bound. On success
+// *header_length is the header size and *avp_length the declared length.
 inline DiameterCheck diameter_check_avp(const uint8_t *buffer, uint32_t length,
 		uint32_t *header_length, uint32_t *avp_length)
 {
@@ -356,6 +360,13 @@ inline DiameterCheck diameter_check_avp(const uint8_t *buffer, uint32_t length,
 		return DIAMETER_CHECK_AVP_BELOW_HEADER;
 	if (avpLength > length)
 		return DIAMETER_CHECK_AVP_PAST_END;
+	// The 12-octet header guard above proves bytes 8 to 11 are readable. The
+	// Length checks come first so a frame whose Length already contradicts its
+	// header keeps that reason.
+	if (headerLength == 12
+			&& buffer[8] == 0 && buffer[9] == 0
+			&& buffer[10] == 0 && buffer[11] == 0)
+		return DIAMETER_CHECK_VENDOR_ID_ZERO;
 	*header_length = headerLength;
 	*avp_length = avpLength;
 	return DIAMETER_CHECK_OK;

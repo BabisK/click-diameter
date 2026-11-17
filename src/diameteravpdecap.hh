@@ -30,7 +30,8 @@ stays aligned. When the AVP is the whole packet, it strips the padding and then
 the header and forwards the value; a standalone AVP that arrives without its
 padding decodes the same way, because there is nothing to strip.
 
-A packet is dropped rather than forwarded when the AVP cannot be read, and the
+A packet is dropped rather than forwarded when the AVP cannot be read or
+carries a value the RFC forbids, and the
 element prints one C<DiameterAvpDecap: dropping malformed packet: REASON> line:
 
 =over 8
@@ -50,7 +51,11 @@ the AVP Length is below its own header;
 
 =item *
 
-the AVP Length runs past the end of the packet.
+the AVP Length runs past the end of the packet;
+
+=item *
+
+the V bit is set with a zero Vendor-Id.
 
 =back
 
