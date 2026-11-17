@@ -219,6 +219,42 @@ expect_element_page() {
 	}
 }
 
+@test "manpages: the three-octet ceilings and the repeated-keyword rule are documented" {
+	local element text description flat
+	for element in DiameterEncap DiameterPushAVP DiameterPopStorePushAVP DiameterAvpEncap; do
+		text=$(page "$element") || return 1
+		description=$(section DESCRIPTION <<<"$text")
+		# The page keeps the header's line breaks, so flatten before matching.
+		flat=${description//$'\n'/ }
+		case $element in
+		DiameterEncap)
+			grep -qF 'message Length would exceed the three-octet field' <<<"$flat" || {
+				echo "DiameterEncap: DESCRIPTION does not name the message Length ceiling"
+				return 1
+			} ;;
+		DiameterPushAVP)
+			grep -qF 'given more than once' <<<"$flat" || {
+				echo "DiameterPushAVP: DESCRIPTION does not name the repeated-keyword rule"
+				return 1
+			}
+			grep -qF '16,777,184' <<<"$flat" || {
+				echo "DiameterPushAVP: DESCRIPTION does not state the generator cap"
+				return 1
+			} ;;
+		DiameterPopStorePushAVP)
+			grep -qF 'stored AVP would exceed' <<<"$flat" || {
+				echo "DiameterPopStorePushAVP: DESCRIPTION does not name the stored-AVP ceiling"
+				return 1
+			} ;;
+		DiameterAvpEncap)
+			grep -qF 'AVP Length would exceed' <<<"$flat" || {
+				echo "DiameterAvpEncap: DESCRIPTION does not name the AVP Length ceiling"
+				return 1
+			} ;;
+		esac
+	done
+}
+
 @test "manpages: the two writers document the seeded identifier counters" {
 	local element text description flat
 	for element in DiameterEncap DiameterRatedSource; do

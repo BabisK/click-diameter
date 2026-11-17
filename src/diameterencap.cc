@@ -5,6 +5,7 @@
 
 #include <click/config.h>
 #include "diameterencap.hh"
+#include "diameterconf.hh"
 #include <click/args.hh>
 #include <click/error.hh>
 #include <click/glue.hh>
@@ -20,6 +21,13 @@ int DiameterEncap::configure(Vector<String> &conf, ErrorHandler *errh)
 	bool proxiable = false;
 	bool retransmited = false;
 	uint32_t appid = 0;
+
+	static const char *const keywords[] = {
+		"CODE", "REQUEST", "ERROR", "PROXIABLE", "RETRANSMITED", "APPID"
+	};
+	if (diameter_reject_duplicate_keywords(conf, errh, keywords,
+			sizeof(keywords) / sizeof(keywords[0])) < 0)
+		return -1;
 
 	if (Args(conf, this, errh)
 	.read_m("CODE", code)
@@ -89,6 +97,17 @@ Packet* DiameterEncap::simple_action(Packet * p_in)
 	const uint32_t payloadLength = p_in->length();
 	const uint32_t paddedLength = (payloadLength + 3) & ~3u;
 	const uint32_t paddingLength = paddedLength - payloadLength;
+	// RFC 6733 section 3 fixes the Message Length at three octets. A payload
+	// that cannot fit even after padding is dropped with its own warning: the
+	// header would otherwise wrap and declare a length the frame does not have.
+	// The guard runs before the counters so a dropped packet consumes no
+	// identifier, and before push() so the drop prints no Put advisory.
+	if (paddedLength > DIAMETER_MAX_24BIT_VALUE - DIAMETER_MESSAGE_HEADER_LENGTH)
+	{
+		click_chatter("%s: dropping packet: the message Length would exceed the three-octet field (RFC 6733 section 3)", class_name());
+		p_in->kill();
+		return 0;
+	}
 	// The identifiers come from the two counters, not from the RNG, so each is
 	// unique for the first 2^32 messages of the run. The counters are atomic,
 	// so two router threads never share a value.

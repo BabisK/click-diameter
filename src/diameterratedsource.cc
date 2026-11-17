@@ -6,6 +6,7 @@
 
 #include <click/config.h>
 #include "diameterratedsource.hh"
+#include "diameterconf.hh"
 #include <click/args.hh>
 #include <click/error.hh>
 #include <click/router.hh>
@@ -32,6 +33,13 @@ DiameterRatedSource::configure(Vector<String> &conf, ErrorHandler *errh)
     uint32_t code = 0;
     uint32_t appid = 0;
     bool request;
+
+    static const char *const keywords[] = {
+	"RATE", "LIMIT", "ACTIVE", "CODE", "REQUEST", "APPID", "STOP"
+    };
+    if (diameter_reject_duplicate_keywords(conf, errh, keywords,
+		sizeof(keywords) / sizeof(keywords[0])) < 0)
+	return -1;
 
     if (Args(conf, this, errh)
 	.read_p("RATE", rate)

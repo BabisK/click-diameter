@@ -125,6 +125,11 @@ deferred:
   - `[false]` `[reject]` The story file carries a verification plan but no recorded results, and `sprint-status.yaml` is untouched — `## Auto Run Result` and the final status are written at Finalize, after review, so the reviewed tree is mid-run; `sprint-status.yaml` is the caller's orchestration state, outside build-auto.
   - `[low]` `[reject]` Unstated decisions the diff resolves: argument order, a `configure()` local rather than a member, and documentation scope wider than the header — The local follows story 1's per-packet-copy design, the order groups the header arguments, and the extra docs are harmless; none diverges observably from the intent, and a correction would be spec prose.
 
+### 2026-11-17 — Deferred-work closure
+
+- `[patched]` DW-1: `popstorepush-mandatory.click` sends a 32-octet frame whose AVP has flags `40` through `DiameterPopStorePushAVP`; the first output is the 20-octet header and the second re-encodes the stored AVP with M still set. A regression that clears `mandatory` in `AvpHeader::decode()` now fails.
+- `[patched]` DW-2: a shared duplicate-keyword check in `src/diameterconf.hh` runs in `DiameterEncap`, `DiameterAvpEncap`, `DiameterPushAVP` and `DiameterRatedSource` before `Args`. A keyword given twice fails configuration naming it instead of Click's silent last-wins. `push-avp-duplicate-octetstring.click`, `encap-duplicate-code.click` and `rated-source-duplicate-rate.click` pin the keyword-only, positional-plus-keyword and value-source shapes; the man page and both READMEs state the rule.
+
 ## Design Notes
 
 The M bit lives in the AVP flags octet, `0x40`, and the V bit is `0x80`; `AvpHeader::encode()` already writes both from members, so the only code change is to stop passing the literal `false`. Keeping the declared local `bool mandatory = false;` rather than a member of `DiameterPushAVP` is deliberate: `configure()` sets the header once and `simple_action()` copies the configured `AvpHeader` per packet (story 1), so the data path gains nothing to race on.

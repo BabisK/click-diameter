@@ -28,7 +28,10 @@ the 12-octet vendor header with V set and that Vendor-Id.
 
 The AVP is padded to a 4-octet boundary with zero octets and its Length excludes
 that padding, per RFC 6733 section 4.1, so a sequence of encoder outputs stays
-aligned. The payload is not validated or interpreted; this element is a writer,
+aligned. The AVP Length is three octets, so a value that cannot fit is dropped
+with C<DiameterAvpEncap: dropping packet: the AVP Length would exceed the
+three-octet field (RFC 6733 section 4.1)> rather than emitted with a wrapped
+field. The payload is not validated or interpreted; this element is a writer,
 not a reader.
 
 Keyword arguments are:

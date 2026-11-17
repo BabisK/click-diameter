@@ -154,6 +154,12 @@ deferred:
   - `[low]` `[defer]` The guard runs after value materialisation and makes an over-ceiling config pay for its value -- same root cause as the materialisation deferral above; no separate item.
   - `[low]` `[reject]` The new `DiameterRatedSource` block uses four-space indentation while its `return` uses a tab, against the story's tabs rule -- the block matches that file's established four-space statements; switching one block to tabs would be the inconsistent result, and the pre-existing style is not this story's to reformat.
 
+### 2026-11-17 — Deferred-work closure
+
+- `[patched]` DW-4: `DiameterEncap` and `DiameterPopStorePushAVP` now compute whether the three-octet Message Length would wrap and drop the packet with their own warnings before `put()`. `encap-length-overflow.click` and `popstorepush-length-overflow.click` pin both; the pop-store case keeps the stored AVP for a later packet.
+- `[patched]` DW-5: `DiameterAvpEncap` drops a value whose three-octet AVP Length would wrap, with its own warning; `avp-encap-length-overflow.click` pins it.
+- `[patched]` DW-6: the four `RAND*STRING` counts are capped at configure time at 16,777,184 characters (16,777,180 with the vendor header), so an impossible value is never materialised. `push-avp-randhex-too-large.click` and its vendor sibling pin the refusal; `push-avp-length-max.click` still pins the inclusive boundary.
+
 ## Design Notes
 
 The two guards answer the same RFC 6733 section 3 sentence from opposite ends of the pipeline. `CODE` is configuration, so a value that cannot be encoded is a caller error and the element refuses to start; there is no legal interpretation of `0x01000118` as a three-octet type. The Length is different: `20 + 8 + value` is only known per packet, and a generator count is one way to reach it, so refusing the configuration would reject an element that emits valid frames for most values. The guard therefore sits in `simple_action()` and names the append rather than the input.

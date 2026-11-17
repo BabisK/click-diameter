@@ -77,6 +77,15 @@ Packet* DiameterPopStorePushAVP::process(Packet * p_in)
 	}
 	else
 	{
+		// RFC 6733 section 3 fixes the Message Length at three octets. Keep the
+		// stored AVP when the packet cannot carry it, so a later packet can; the
+		// drop is reported here rather than discovered as a wrapped Length.
+		if (ah.getLengthPadded() > DIAMETER_MAX_24BIT_VALUE - messageLength)
+		{
+			click_chatter("%s: dropping packet: pushing the stored AVP would exceed the three-octet Length field (RFC 6733 section 3)", class_name());
+			p_in->kill();
+			return 0;
+		}
 		wp = p_in->put(ah.getLengthPadded());
 		memset(wp->data() + messageLength, 0, ah.getLengthPadded());
 		ah.encode(wp->data() + messageLength);

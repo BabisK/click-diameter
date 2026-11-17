@@ -147,7 +147,10 @@ upper case). At most one value source -- `OCTETSTRING` or one of these --
 supplies the value: supplying two of them fails configuration with an error
 naming both, while supplying none appends the header-only AVP. A zero generator
 count and `RANDUINT32 false` are not sources, so either may sit beside the one
-real source.
+real source. A generator count above 16,777,184 (16,777,180 with the vendor
+header) cannot fit the three-octet message Length, so it fails configuration. A
+keyword repeated in one configuration also fails configuration, naming the
+argument, instead of silently keeping the last value.
 
 ### Turn a request into an answer
 
@@ -177,13 +180,13 @@ Element reference
 | Element | In/out | Arguments | What it does |
 |---|---|---|---|
 | `DiameterRatedSource` | 0/1 | `CODE`, `REQUEST` (required); `RATE` (pps, default 10), `LIMIT`, `ACTIVE`, `APPID`, `STOP` | Emits bare 20-byte messages at a token-bucket rate; hop-by-hop and end-to-end identifiers are seeded once from `click_random()` and counter-advanced per emitted message, so each is unique for the first 2^32 messages of a run; it never sets E, P or T, so a generated request carries R alone and a generated answer none; rejects a `CODE` above `0xFFFFFF` at configure time |
-| `DiameterEncap` | 1/1 | `CODE`, `REQUEST` (required); `ERROR`, `PROXIABLE`, `RETRANSMITED`, `APPID` | Prepends a 20-byte Diameter header to the packet and zero-pads the payload to a 4-octet boundary, counting the pad in the Length; hop-by-hop and end-to-end identifiers are seeded once from `click_random()` and counter-advanced per emitted message, so each is unique for the first 2^32 messages of a run; accepts `PROXIABLE` on either type, rejects `ERROR` on a request and `RETRANSMITED` on an answer, and rejects a `CODE` above `0xFFFFFF` at configure time |
+| `DiameterEncap` | 1/1 | `CODE`, `REQUEST` (required); `ERROR`, `PROXIABLE`, `RETRANSMITED`, `APPID` | Prepends a 20-byte Diameter header to the packet and zero-pads the payload to a 4-octet boundary, counting the pad in the Length; hop-by-hop and end-to-end identifiers are seeded once from `click_random()` and counter-advanced per emitted message, so each is unique for the first 2^32 messages of a run; accepts `PROXIABLE` on either type, rejects `ERROR` on a request and `RETRANSMITED` on an answer, rejects a `CODE` above `0xFFFFFF`, and drops a payload whose message Length would exceed `0xFFFFFF` at run time |
 | `DiameterDecap` | 1/1 | — | Strips the 20-byte header; validates the message first |
-| `DiameterPushAVP` | 1/1 | `CODE` (required); `VENDORSPEC`, `VENDOR`, `MANDATORY`; one of `OCTETSTRING`, `UINT32`, `RANDUINT32`, `RANDALPHANUMSTRING N`, `RANDNUMSTRING N`, `RANDALPHASTRING N`, `RANDHEXSTRING N` | Appends an AVP and updates the message Length; `MANDATORY` sets the AVP's M bit; two value sources are refused at configure time; validates the message first and drops a packet whose appended AVP would push the message Length past `0xFFFFFF`, with its own warning |
+| `DiameterPushAVP` | 1/1 | `CODE` (required); `VENDORSPEC`, `VENDOR`, `MANDATORY`; one of `OCTETSTRING`, `UINT32`, `RANDUINT32`, `RANDALPHANUMSTRING N`, `RANDNUMSTRING N`, `RANDALPHASTRING N`, `RANDHEXSTRING N` | Appends an AVP and updates the message Length; `MANDATORY` sets the AVP's M bit; two value sources or a repeated keyword are refused at configure time; validates the message first and drops a packet whose appended AVP would push the message Length past `0xFFFFFF`, with its own warning |
 | `DiameterPopAVP` | 1/1 | — | Removes the last AVP and updates the message Length; validates the message first |
-| `DiameterPopStorePushAVP` | 1/2 | — | Pops the last AVP from one packet (output 0) and pushes that value back onto the next (output 1); validates the message first |
+| `DiameterPopStorePushAVP` | 1/2 | — | Pops the last AVP from one packet (output 0) and pushes that value back onto the next (output 1); validates the message first and drops a push that would exceed `0xFFFFFF`, keeping the stored AVP |
 | `DiameterFlipRequest` | 1/1 | — | Toggles the request bit, turning a request into an answer and back; P is kept in both directions, T is cleared when it produces an answer and E when it produces a request |
-| `DiameterAvpEncap` | 1/1 | `CODE` (required); `VENDORID`, `MANDATORY` | Prepends an AVP header (8 bytes, or 12 with `VENDORID`) and pads the AVP to a 4-octet boundary |
+| `DiameterAvpEncap` | 1/1 | `CODE` (required); `VENDORID`, `MANDATORY` | Prepends an AVP header (8 bytes, or 12 with `VENDORID`) and pads the AVP to a 4-octet boundary; drops a value whose AVP Length would exceed `0xFFFFFF` |
 | `DiameterAvpDecap` | 1/1 | — | Strips one AVP: consumes the AVP whole when octets follow it, otherwise forwards its value (header 8 bytes, or 12 following the V bit; padding dropped either way) |
 
 Documentation
@@ -217,12 +220,14 @@ CLICK=$HOME/click/bin/click bats --tap tests   # this package installed there
 
 `tests/smoke.bats` runs each config under `tests/configs/` and asserts its exact
 output. The `malformed-*` configs assert the drop path instead — exit 0, one
-warning naming the element and reason, and no `Print` line — and
-`push-avp-length-overflow.click` asserts the other drop shape: a well-formed
-message whose appended AVP would push the Length past three octets is dropped
-rather than wrapped, with a warning naming the append. Fourteen configs assert a
-configure failure: the two `DiameterEncap` flag pairs, the two `VENDORSPEC` and
-`VENDOR` refusals, six `DiameterPushAVP` value-source conflicts, and the
+warning naming the element and reason, and no `Print` line — while
+`push-avp-length-overflow.click`, `encap-length-overflow.click`,
+`popstorepush-length-overflow.click` and `avp-encap-length-overflow.click` assert
+the other drop shape: a well-formed frame whose three-octet Length field cannot
+hold the result is dropped rather than wrapped, with a warning naming the field.
+Nineteen configs assert a configure failure: the two `DiameterEncap` flag pairs,
+the two `VENDORSPEC` and `VENDOR` refusals, six `DiameterPushAVP` value-source
+conflicts, three repeated-keyword configs, two generator-cap configs, and the
 CODE-range configs in both writers. Each expects a non-zero exit, the named
 argument in the error, and no `Print` line. `tests/manpages.bats` reads
 the prefix the Click binary lives in and asserts one page per element, with its

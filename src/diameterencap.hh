@@ -52,7 +52,11 @@ element has no request to consult, so the caller's declaration stands.
 The Command Code field is three octets (RFC 6733 section 3), so CODE must not
 exceed 0xFFFFFF: a larger value fails configuration with an error naming the
 argument rather than being truncated on the wire. The two experimental values
-section 3.1 reserves, 0xFFFFFE and 0xFFFFFF, are in range.
+section 3.1 reserves, 0xFFFFFE and 0xFFFFFF, are in range. The Message Length is
+three octets too, so a payload that cannot fit even after padding is dropped with
+C<DiameterEncap: dropping packet: the message Length would exceed the three-octet
+field (RFC 6733 section 3)> rather than emitted with a wrapped field, and a
+dropped packet consumes no identifier.
 
 The element does not validate the incoming packet; it is a writer, not a
 reader.

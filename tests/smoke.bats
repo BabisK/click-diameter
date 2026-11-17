@@ -443,6 +443,14 @@ expect_unique_identifiers() {
 	expect 'push-avp-randuint32-false:   32 | 01000020 80000118 00000000 00000001 00000002 00000108 0000000b 61626300'
 }
 
+@test "push-avp-randuint32-zero: a zero draw is a four-octet value, AVP Length 12" {
+	run_click push-avp-randuint32-zero.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# SEED 808357014 makes Click's first random() draw zero, so the drawn value is
+	# four zero octets rather than an empty AVP: AVP Length 12, frame 32 octets.
+	expect 'push-avp-randuint32-zero:   32 | 01000020 80000118 00000000 00000001 00000002 0000010c 0000000c 00000000'
+}
+
 @test "push-avp-rand-zero: a zero generator count is unused, not a second source" {
 	run_click push-avp-rand-zero.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
@@ -452,23 +460,49 @@ expect_unique_identifiers() {
 	[[ "$output" =~ $expected ]] || { echo "expected: 32 octets, AVP Length 12, four hex characters"; return 1; }
 }
 
-@test "push-avp-duplicate-octetstring: a repeated keyword is one source, last value wins" {
+@test "push-avp-duplicate-octetstring: a repeated keyword fails configuration" {
 	run_click push-avp-duplicate-octetstring.click
-	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
-	# Click Args keeps the last repeated keyword, so this is one source ("bc"),
-	# not two: the conflict check must not count a keyword twice. The value is
-	# 2 octets, so AVP Length 10 and two zero pad octets.
-	expect 'push-avp-duplicate-octetstring:   32 | 01000020 80000118 00000000 00000001 00000002 00000108 0000000a 62630000'
+	# A repeated keyword used to be Click's last-wins, silently discarding the
+	# first value; it is now a caller error naming the repeated argument.
+	expect_configure_failure push-avp-duplicate-octetstring.click DiameterPushAVP 'the OCTETSTRING argument is given more than once'
+}
+
+@test "encap-duplicate-code: a repeated keyword fails configuration" {
+	run_click encap-duplicate-code.click
+	# The same guard runs in every configurable element of the package.
+	expect_configure_failure encap-duplicate-code.click DiameterEncap 'the CODE argument is given more than once'
+}
+
+@test "rated-source-duplicate-rate: a repeated keyword fails configuration" {
+	run_click rated-source-duplicate-rate.click
+	# RATE is also a positional argument; a repeat after the first keyword is
+	# caught by the same guard.
+	expect_configure_failure rated-source-duplicate-rate.click DiameterRatedSource 'the RATE argument is given more than once'
+}
+
+@test "push-avp-randhex-too-large: a generator count past 16,777,184 fails configuration" {
+	run_click push-avp-randhex-too-large.click
+	# The value plus the AVP and message headers cannot fit the three-octet
+	# Length, so it is refused before it is materialised per packet.
+	expect_configure_failure push-avp-randhex-too-large.click DiameterPushAVP 'the RANDHEXSTRING argument must not exceed 16777184: a larger value cannot fit the three-octet message Length (RFC 6733 section 3)'
+}
+
+@test "push-avp-randhex-too-large-vendor: the vendor header lowers the limit to 16,777,180" {
+	run_click push-avp-randhex-too-large-vendor.click
+	# The 12-octet vendor header leaves four fewer octets than the 8-octet one.
+	expect_configure_failure push-avp-randhex-too-large-vendor.click DiameterPushAVP 'the RANDHEXSTRING argument must not exceed 16777180: a larger value cannot fit the three-octet message Length (RFC 6733 section 3)'
 }
 
 @test "push-avp-length-overflow: an append past 0xFFFFFF is dropped, not wrapped" {
 	run_click push-avp-length-overflow.click
-	# A-9: 20 + 8 + 16,777,188 = 16,777,216 octets, one past the three-octet
-	# Length field, used to wrap Length to 0x000000 and emit the frame. The
-	# guard runs before put(), so the drop is exactly one line and Click's Put
-	# advisory cannot appear beside it.
+	# A-9: the first PushAVP fills the message to the largest legal 16,777,212
+	# octets, and the second appends an 8-octet AVP, which would reach 16,777,220.
+	# The guard runs before put(), so the drop is one line; the 16 MB append of
+	# the first AVP makes Click print its Put advisory beside it.
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
-	expect 'DiameterPushAVP: dropping packet: appending the AVP would exceed the three-octet Length field (RFC 6733 section 3)'
+	local others
+	others=$(grep -v '^expensive Packet::put' <<<"$output" || true)
+	[ "$others" = 'DiameterPushAVP: dropping packet: appending the AVP would exceed the three-octet Length field (RFC 6733 section 3)' ] || { echo "unexpected output: $others"; return 1; }
 }
 
 @test "push-avp-length-max: the largest legal message still appends" {
@@ -665,6 +699,14 @@ expect_unique_identifiers() {
 	expect 'avp-padding-none:   12 | 00000108 0000000c 7778797a'
 }
 
+@test "avp-encap-length-overflow: an AVP past 0xFFFFFF is dropped, not wrapped" {
+	run_click avp-encap-length-overflow.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# The value alone would make the three-octet AVP Length wrap, so the
+	# envelope is dropped with its own warning and nothing reaches Print.
+	expect 'DiameterAvpEncap: dropping packet: the AVP Length would exceed the three-octet field (RFC 6733 section 4.1)'
+}
+
 @test "avp-padding-vendor: the 12-octet vendor header is padded too" {
 	run_click avp-padding-vendor.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
@@ -855,6 +897,14 @@ decap: +8 \| deadbeef 00000000$'
 	expect_drop DiameterPushAVP 'AVP length below its header'
 }
 
+@test "encap-length-overflow: a message past 0xFFFFFF is dropped, not wrapped" {
+	run_click encap-length-overflow.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# A 16,777,200-octet payload pads to the same length, and 20 plus that exceeds
+	# the three-octet Message Length; the frame is dropped before put().
+	expect 'DiameterEncap: dropping packet: the message Length would exceed the three-octet field (RFC 6733 section 3)'
+}
+
 @test "encap-decap: the encapsulated payload survives Decap without a drop" {
 	run_click encap-decap.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
@@ -1036,6 +1086,26 @@ pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
 	run_click popstorepush-roundtrip.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
 	expect $'out0:   32 | 01000020 80000118 00000000 00000001 00000002 00000108 0000000a 61620000\nout1:   44 | 0100002c 80000118 00000000 00000001 00000002 00000108 0000000a 61620000 0000010c 0000000a 78790000'
+}
+
+@test "popstorepush-mandatory: an M=1 AVP survives decode and re-encode" {
+	run_click popstorepush-mandatory.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# The first pass pops the AVP (output 0, 20 octets); the second pushes the
+	# stored AVP back, and output 1 carries it again with flags 40.
+	expect $'out0:   20 | 01000014 80000118 00000000 00000001 00000002\nout1:   44 | 0100002c 80000118 00000000 00000001 00000002 00000108 4000000b 61626300 00000108 4000000b 61626300'
+}
+
+@test "popstorepush-length-overflow: a stored AVP that would exceed 0xFFFFFF is dropped" {
+	run_click popstorepush-length-overflow.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# The maximal appends make Click print its put advisory; the Print line is the
+	# popped 20-octet header and the only other line is the drop.
+	local printed others
+	printed=$(grep '^out0:' <<<"$output")
+	others=$(grep -v '^out0:' <<<"$output" | grep -v '^expensive Packet::put' || true)
+	[ "$others" = 'DiameterPopStorePushAVP: dropping packet: pushing the stored AVP would exceed the three-octet Length field (RFC 6733 section 3)' ] || { echo "unexpected output: $others"; return 1; }
+	[[ "$printed" =~ ^out0:\ +20\ \|\ 01000014\ 80000118\ 00000000\ 00000001\ 00000002$ ]] || { echo "expected: out0 20 octets"; return 1; }
 }
 
 @test "malformed-version-decap: Version 2 dropped by DiameterDecap, no payload forwarded" {

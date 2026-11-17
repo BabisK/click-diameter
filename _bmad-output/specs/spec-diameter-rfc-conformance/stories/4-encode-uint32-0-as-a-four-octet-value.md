@@ -131,6 +131,10 @@ deferred:
   - `[false]` `[reject]` The diff amplifies beyond the literal numbers (vendor Length 16, whole-frame pins) — Refuted: the extra pin sits inside the same §4.2 sentence the intent quotes and inside the story's matrix, and no expectation contradicts the intent.
   - `[false]` `[reject]` A type-level reading of the intent is unaddressed — Refuted: the epic excludes a dictionary or type model (SPEC non-goals), and the intent's clause is about not changing the empty-OctetString bytes; the presence rule is the only reading the contract permits.
 
+### 2026-11-17 — Deferred-work closure
+
+- `[patched]` DW-3: `push-avp-randuint32-zero.click` uses `RandomSeed(SEED 808357014)`, whose first glibc `random()` draw is zero (a full 32-bit seed search found it). The frame is 32 octets with AVP Length 12 and a four-octet zero, so a regression that keys the length off magnitude rather than presence now fails.
+
 ## Design Notes
 
 Presence has to be tracked separately because `uint32_t` cannot represent "not supplied": `UINT32 0` and an absent `UINT32` both leave `datauint` at zero. Click's `Args::read_status()` is the supported signal -- `find()` clears `_read_status` when the keyword is missing -- and upstream `RandomSeed` uses exactly that pattern for its optional `SEED`. Setting `hasUint = uintSpecified || randUInt32` once in `configure()` keeps the rule in one expression, so the pinned `UINT32 0` path and the unpinnable `RANDUINT32` zero draw share the same variable.

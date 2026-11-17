@@ -5,6 +5,7 @@
 
 #include <click/config.h>
 #include "diameterpushavp.hh"
+#include "diameterconf.hh"
 #include <click/args.hh>
 #include <click/confparse.hh>
 #include <click/error.hh>
@@ -91,6 +92,15 @@ int DiameterPushAVP::configure(Vector<String> &conf, ErrorHandler *errh)
 	// is the documented no-value request rather than an absence.
 	bool octetSpecified = false;
 
+	static const char *const keywords[] = {
+		"CODE", "VENDORSPEC", "VENDOR", "MANDATORY", "OCTETSTRING",
+		"UINT32", "RANDUINT32", "RANDALPHANUMSTRING", "RANDNUMSTRING",
+		"RANDALPHASTRING", "RANDHEXSTRING"
+	};
+	if (diameter_reject_duplicate_keywords(conf, errh, keywords,
+			sizeof(keywords) / sizeof(keywords[0])) < 0)
+		return -1;
+
 	if (Args(conf, this, errh)
 		.read_m("CODE", code)
 		.read("VENDORSPEC", vendorSpec)
@@ -151,6 +161,23 @@ int DiameterPushAVP::configure(Vector<String> &conf, ErrorHandler *errh)
 	// absent VENDOR and an explicit VENDOR 0 are the same refusal.
 	if (vendorSpec && vendorId == 0)
 		return errh->error("the VENDOR argument must be non-zero when VENDORSPEC is true (RFC 6733 section 4.1.1)");
+
+	// A generator count above what a 20-octet message can carry could never be
+	// appended: the value alone would overflow the three-octet message Length.
+	// Refuse it at configure time instead of materialising it per packet and
+	// dropping the result. The largest legal message is a multiple of 4, so the
+	// cap rounds the available body down and subtracts the AVP header.
+	const uint32_t maxGenerated =
+			((DIAMETER_MAX_24BIT_VALUE - DIAMETER_MESSAGE_HEADER_LENGTH) & ~3u)
+			- (vendorSpec ? 12 : 8);
+	if (randAlphaNumString > maxGenerated)
+		return errh->error("the RANDALPHANUMSTRING argument must not exceed %u: a larger value cannot fit the three-octet message Length (RFC 6733 section 3)", (unsigned) maxGenerated);
+	if (randNumString > maxGenerated)
+		return errh->error("the RANDNUMSTRING argument must not exceed %u: a larger value cannot fit the three-octet message Length (RFC 6733 section 3)", (unsigned) maxGenerated);
+	if (randAlphaString > maxGenerated)
+		return errh->error("the RANDALPHASTRING argument must not exceed %u: a larger value cannot fit the three-octet message Length (RFC 6733 section 3)", (unsigned) maxGenerated);
+	if (randHexString > maxGenerated)
+		return errh->error("the RANDHEXSTRING argument must not exceed %u: a larger value cannot fit the three-octet message Length (RFC 6733 section 3)", (unsigned) maxGenerated);
 
 	ah.setCode(code);
 	ah.setMandatory(mandatory);
