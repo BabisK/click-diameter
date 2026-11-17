@@ -40,6 +40,10 @@ the packet is shorter than the 20-octet header;
 
 =item *
 
+its Length field is not a multiple of 4;
+
+=item *
+
 the header's Length field does not equal the packet length;
 
 =item *

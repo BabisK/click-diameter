@@ -20,11 +20,15 @@ prepends a Diameter header to each packet
 
 =d
 
-Prepends a 20-octet Diameter header to every incoming packet, leaving the
-payload untouched. The header carries version 1, Length 20 plus the incoming
-packet length, the Command Code CODE, the Application-Id APPID, and hop-by-hop
-and end-to-end identifiers drawn from click_random() for each packet. Because
-the header is exactly 20 octets, the payload needs no padding.
+Prepends a 20-octet Diameter header to every incoming packet. The header
+carries version 1, Length 20 plus the padded payload, the Command Code CODE,
+the Application-Id APPID, and hop-by-hop and end-to-end identifiers drawn from
+click_random() for each packet. RFC 6733 section 3 requires the Message Length
+to be a multiple of 4, so the payload is zero-padded up to a 4-octet boundary
+and the pad octets count in the Length: a 5-octet payload gains three zero pad
+octets and Length 28, while a payload already on the boundary gains none and
+keeps its bytes. The pad is part of the message, so DiameterDecap forwards it
+along with the payload.
 
 CODE and REQUEST are required. The flags start clear and only the arguments the
 caller names are set: E from ERROR, P from PROXIABLE and T from RETRANSMITED.
@@ -33,6 +37,11 @@ that sets ERROR on a request or RETRANSMITED on an answer is rejected while the
 element is configured, with an error naming the argument. PROXIABLE is accepted
 on either type: section 6.2 mirrors a request's P into its answer, and this
 element has no request to consult, so the caller's declaration stands.
+
+The Command Code field is three octets (RFC 6733 section 3), so CODE must not
+exceed 0xFFFFFF: a larger value fails configuration with an error naming the
+argument rather than being truncated on the wire. The two experimental values
+section 3.1 reserves, 0xFFFFFE and 0xFFFFFF, are in range.
 
 The element does not validate the incoming packet; it is a writer, not a
 reader.
@@ -43,7 +52,9 @@ Keyword arguments are:
 
 =item CODE
 
-Integer. Required. The Command Code written into the header.
+Integer. Required. The Command Code written into the header. Must not exceed
+0xFFFFFF, the largest value the three-octet field holds (RFC 6733 section 3);
+a larger value fails configuration.
 
 =item REQUEST
 

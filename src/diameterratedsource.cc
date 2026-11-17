@@ -44,6 +44,13 @@ DiameterRatedSource::configure(Vector<String> &conf, ErrorHandler *errh)
 	.complete() < 0)
 	return -1;
 
+    // RFC 6733 section 3 fixes the Command Code at three octets, so a larger
+    // value cannot be encoded: 0x01000118 would go out as 0x000118, a different
+    // message type. Refuse the configuration instead of truncating it; the
+    // experimental 0xFFFFFE and 0xFFFFFF of section 3.1 stay in range.
+    if (code > DIAMETER_MAX_24BIT_VALUE)
+	return errh->error("the CODE argument must not exceed 0xFFFFFF: the Command Code field is three octets (RFC 6733 section 3)");
+
     int burst = rate < 200 ? 2 : rate / 100;
     _tb.assign(rate, burst);
     _limit = (limit >= 0 ? unsigned(limit) : NO_LIMIT);

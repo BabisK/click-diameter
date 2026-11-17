@@ -178,7 +178,45 @@ expect_element_page() {
 			echo "$element: DESCRIPTION does not name the bad-Version reason"
 			return 1
 		}
+		# A-4: the same five readers reject a Length that is not a multiple of
+		# 4, and the page is where a caller learns that rule. The bullet and
+		# prose forms say "its Length field", so match the rule rather than
+		# the full reason string.
+		grep -qF 'not a multiple of 4' <<<"$flat" || {
+			echo "$element: DESCRIPTION does not name the unaligned-Length rule"
+			return 1
+		}
 	done
+}
+
+@test "manpages: the writers document the Command Code range and the append drop" {
+	local element text description flat
+	for element in DiameterEncap DiameterRatedSource; do
+		text=$(page "$element") || return 1
+		description=$(section DESCRIPTION <<<"$text")
+		grep -qF '0xFFFFFF' <<<"$description" || {
+			echo "$element: DESCRIPTION does not state the Command Code ceiling"
+			return 1
+		}
+	done
+	# A-4: the Encap page is where a caller learns that the writer pads the
+	# payload and counts the pad in the Length.
+	text=$(page DiameterEncap) || return 1
+	description=$(section DESCRIPTION <<<"$text")
+	flat=${description//$'\n'/ }
+	grep -qF 'zero-padded up to a 4-octet boundary' <<<"$flat" || {
+		echo "DiameterEncap: DESCRIPTION does not state the payload padding"
+		return 1
+	}
+	# The page keeps the header's line breaks, so flatten the description
+	# before matching the reason, as the bad-Version check above does.
+	text=$(page DiameterPushAVP) || return 1
+	description=$(section DESCRIPTION <<<"$text")
+	flat=${description//$'\n'/ }
+	grep -qF 'appending the AVP would exceed the three-octet Length field' <<<"$flat" || {
+		echo "DiameterPushAVP: DESCRIPTION does not name the append drop"
+		return 1
+	}
 }
 
 @test "manpages: the two pop elements document the no-AVP no-op" {

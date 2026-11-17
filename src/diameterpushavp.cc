@@ -215,6 +215,23 @@ Packet* DiameterPushAVP::simple_action(Packet * p_in)
 	uint32_t avpDataLength = valueString.length() > 0 ? valueString.length() : (hasUint ? 4 : 0);
 	uint32_t avpLength = avpHeaderLength + avpDataLength;
 	uint32_t avpLengthPadded = ((avpLength + 3) / 4) * 4;
+
+	// RFC 6733 section 3 fixes the message Length at three octets, so an append
+	// that would grow the message past 0xFFFFFF cannot be encoded: the field
+	// would wrap and the frame would declare a length it does not have. The
+	// final length depends on the per-packet value, so this is a run-time
+	// decision, and the packet is still well formed: drop it and name the
+	// append rather than the input. The guard sits before put(), so the drop
+	// prints no Put advisory. The header Length was just proved equal to the
+	// packet length, so messageLength is at most 0xFFFFFF and this sum cannot
+	// overflow uint32_t.
+	if (messageLength + avpLengthPadded > DIAMETER_MAX_24BIT_VALUE)
+	{
+		click_chatter("%s: dropping packet: appending the AVP would exceed the three-octet Length field (RFC 6733 section 3)", class_name());
+		p_in->kill();
+		return 0;
+	}
+
 	WritablePacket *p = p_in->put(avpLengthPadded);
 
 	DiameterHeader dh;

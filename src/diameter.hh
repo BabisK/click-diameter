@@ -12,7 +12,13 @@
 // frame.
 enum : uint32_t {
 	DIAMETER_MESSAGE_HEADER_LENGTH = 20,
-	DIAMETER_AVP_HEADER_LENGTH = 8
+	DIAMETER_AVP_HEADER_LENGTH = 8,
+	// The largest value a three-octet field holds. RFC 6733 section 3 sizes
+	// both the message Length and the Command Code at three octets, so a
+	// larger value cannot be written. DiameterEncap and DiameterRatedSource
+	// refuse a CODE above it at configure time, and DiameterPushAVP drops a
+	// packet whose append would grow the message past it.
+	DIAMETER_MAX_24BIT_VALUE = 0xFFFFFF
 };
 
 class DiameterHeader {
@@ -281,6 +287,7 @@ enum DiameterCheck {
 	DIAMETER_CHECK_SHORT_MESSAGE_HEADER,
 	DIAMETER_CHECK_SHORT_AVP_HEADER,
 	DIAMETER_CHECK_SHORT_VENDOR_AVP_HEADER,
+	DIAMETER_CHECK_LENGTH_NOT_ALIGNED,
 	DIAMETER_CHECK_LENGTH_MISMATCH,
 	DIAMETER_CHECK_AVP_BELOW_HEADER,
 	DIAMETER_CHECK_AVP_PAST_END,
@@ -302,6 +309,8 @@ inline const char *diameter_check_reason(DiameterCheck check)
 		return "packet shorter than the 8-octet AVP header";
 	case DIAMETER_CHECK_SHORT_VENDOR_AVP_HEADER:
 		return "packet shorter than the 12-octet vendor AVP header";
+	case DIAMETER_CHECK_LENGTH_NOT_ALIGNED:
+		return "the Length field is not a multiple of 4";
 	case DIAMETER_CHECK_LENGTH_MISMATCH:
 		return "header Length does not match packet length";
 	case DIAMETER_CHECK_AVP_BELOW_HEADER:
@@ -321,9 +330,9 @@ inline const char *diameter_check_reason(DiameterCheck check)
 // Checks the Diameter header at buffer[0..length): the Version is tested first,
 // whenever at least one octet is present, so a frame that disagrees is reported
 // as such before the whole-header or Length check; the rest of the checks
-// require a whole 20-octet header whose Length field equals length and whose
-// flags are legal for its message type. Elements that only touch the header stop
-// here.
+// require a whole 20-octet header whose Length field is a multiple of 4 and
+// equals length and whose flags are legal for its message type. Elements that
+// only touch the header stop here.
 inline DiameterCheck diameter_check_header(const uint8_t *buffer, uint32_t length)
 {
 	// RFC 6733 section 3 fixes the Version at 1, so a frame that disagrees is
@@ -336,6 +345,13 @@ inline DiameterCheck diameter_check_header(const uint8_t *buffer, uint32_t lengt
 		return DIAMETER_CHECK_SHORT_MESSAGE_HEADER;
 	const uint32_t declared = ((uint32_t) buffer[1] << 16)
 			| ((uint32_t) buffer[2] << 8) | buffer[3];
+	// RFC 6733 section 3: the Message Length covers the header and the padded
+	// AVPs, so it is always a multiple of 4. A Length that is not cannot
+	// describe a Diameter message at any packet length, so it is reported
+	// before the comparison against this packet; the short-header guard above
+	// already proved the three octets are readable.
+	if ((declared & 3u) != 0)
+		return DIAMETER_CHECK_LENGTH_NOT_ALIGNED;
 	if (declared != length)
 		return DIAMETER_CHECK_LENGTH_MISMATCH;
 	// RFC 6733 section 3: E MUST NOT be set in request messages and T MUST NOT
@@ -386,10 +402,11 @@ inline DiameterCheck diameter_check_avp(const uint8_t *buffer, uint32_t length,
 
 // Checks whether buffer[0..length) holds exactly one well-formed Diameter
 // message: a header that passes diameter_check_header() -- Version 1, a Length
-// field equal to length, and legal flags -- then a run of AVPs that each pass
-// diameter_check_avp() and whose padded lengths stay inside the message, so the
-// walk always advances. On success *last_avp_offset is the offset of the final
-// AVP, or 0 when the message has none; pass 0 when the caller does not need it.
+// field that is a multiple of 4 and equal to length, and legal flags -- then a
+// run of AVPs that each pass diameter_check_avp() and whose padded lengths stay
+// inside the message, so the walk always advances. On success *last_avp_offset
+// is the offset of the final AVP, or 0 when the message has none; pass 0 when
+// the caller does not need it.
 inline DiameterCheck diameter_check_message(const uint8_t *buffer,
 		uint32_t length, uint32_t *last_avp_offset)
 {
