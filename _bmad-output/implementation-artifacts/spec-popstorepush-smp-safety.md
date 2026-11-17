@@ -138,6 +138,13 @@ context: ['{project-root}/AGENTS.md']
   Click build takes 6.0 s. The same test passed at 21:52 and consistently times
   out at 22:13 with no code change, so the margin tracks CPU clock. Recorded in
   `deferred-work.md` rather than fixed here.
+- **CI follow-up (2026-11-17).** Pull request 21's smoke job failed on exactly
+  that run — `not ok 120 … click exit 124` after 10.0 s — while the
+  ThreadSanitizer job passed all five `smp-*` configs and every `smp-*` smoke
+  test passed, including the new pairing test. The timeout margin, not the
+  element, is the defect: `click_timeout` now defaults to 30 s in
+  `tests/smoke.bats`, `tests/README.md` states why, and the deferred entry is
+  closed. A genuine hang still fails, only later.
 
 ## Spec Change Log
 
@@ -172,6 +179,12 @@ context: ['{project-root}/AGENTS.md']
 | R-16 | blind, edge | The planned closure evidence never reached the owning stories' triage logs | medium | patch | The spec's own task requires it. Rows appended to `spec-diameter-rfc-conformance/stories/1-…` and `spec-diameter-package-hardening/stories/8-…`, citing this spec. |
 | R-17 | blind | `stories.yaml` and `sprint-status.yaml` were not updated | reject | — | Planning bookkeeping outside the intent; the closure is recorded in the two owning triage logs and this spec, which is the record the spec's task names. |
 | R-18 | blind | The triage log carried pre-review verdicts, no layer preamble and no PR evidence | reject | — | Spec text; the rows above are this pass, and no pull request exists until the branch is pushed. |
+
+### 2026-11-17 — PR 21 CI failure
+
+| # | Source | Finding | Verdict | Route | Evidence |
+|---|--------|---------|---------|-------|----------|
+| C-1 | CI | The smoke job fails with `not ok 120 identifiers-rated-source-pull-unique … click exit 124` | medium | patch | The config is CPU-bound under `--simtime`: 12.2 s at 3.19 GHz and 10.0 s on the CI runner, against a 10 s default, with the same 12.4 s on the `7ac78a9` module. `click_timeout` defaults to 30 now; the deferred entry is closed. |
 
 ## Design Notes
 

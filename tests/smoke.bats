@@ -80,7 +80,12 @@
 # storage: ThreadSanitizer is what proves that.
 
 click=${CLICK:-click}
-click_timeout=${CLICK_TIMEOUT:-10}
+# Simulated-time runs are CPU-bound, not wall-clock-bound: the RATE 10 pull
+# config below spins through refused pulls for one simulated 0.3 s span, which
+# measured 12.2 s at 3.19 GHz and 10.1 s on the CI runner, so the old 10 s bound
+# killed a correct run. A hang still fails, only later; override with
+# CLICK_TIMEOUT when a slower host needs more.
+click_timeout=${CLICK_TIMEOUT:-30}
 
 # run_config PATH -- run a config at PATH under a timeout, capturing the output.
 run_config() {
