@@ -199,6 +199,12 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `push-avp-mandatory.click` | `MANDATORY true` sets the M bit: AVP flags `40` rather than `00` (A-2, RFC 6733 §4.1) |
 | `push-avp-mandatory-vendor.click` | `MANDATORY true, VENDORSPEC true, VENDOR 42` sets M and V in separate bits: AVP flags `c0` |
 | `push-avp-mandatory-false.click` | `MANDATORY false` leaves the M bit clear: byte-identical to `push-avp.click` |
+| `push-avp-uint32-zero.click` | `UINT32 0` is a four-octet zero at AVP Length 12: 32 octets, not a header-only AVP (A-3, RFC 6733 §4.2) |
+| `push-avp-uint32-zero-vendor.click` | `UINT32 0` after the 12-octet vendor header is AVP Length 16: 36 octets (A-3, RFC 6733 §4.2) |
+| `push-avp-empty.click` | an empty `OCTETSTRING` keeps the 8-octet header-only AVP, the case that must not move (A-3, RFC 6733 §4.2) |
+| `push-avp-empty-vendor.click` | the same empty value after the 12-octet vendor header: AVP Length 12, 32 octets (A-3, RFC 6733 §4.2) |
+| `push-avp-no-value.click` | no string and no numeric source: AVP Length 8, 28 octets (A-3, RFC 6733 §4.2) |
+| `push-avp-uint32.click` | `UINT32 2001` is the four-octet big-endian value `000007d1`: AVP Length 12, 32 octets |
 | `push-avp-rand.click` | generated value, 8 characters |
 | `rand-alphanum-one.click` | `RANDALPHANUMSTRING 1` emits one character: AVP Length 9 and three zero pad octets (F-8) |
 | `rand-hex-one.click` | `RANDHEXSTRING 1` emits one character rather than an empty AVP (F-8) |

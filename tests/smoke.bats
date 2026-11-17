@@ -16,7 +16,11 @@
 # rerun over a second later to reproduce the first run byte for byte, so a
 # clock-seeded stream fails. The rand-* tests pin the length and the alphabet of
 # each DiameterPushAVP generator. The push-avp-vendor* configs pin the V=1
-# header bytes and the refusal of a zero Vendor-Id. The push-avp tests compare
+# header bytes and the refusal of a zero Vendor-Id. The push-avp-uint32* configs
+# pin A-3: a zero numeric value is a four-octet value at AVP Length 12 (16 with
+# the vendor header), and a non-zero UINT32 is the same four octets;
+# push-avp-empty, push-avp-empty-vendor and push-avp-no-value pin the no-value
+# shapes that must stay at the header length. The push-avp tests compare
 # whole frames -- literally, or as a pattern where a generated value cannot be
 # pinned -- so the existing expectations that cover the AVP header, and so omit
 # MANDATORY, pin M=0 as the regression half; push-avp-mandatory and
@@ -212,6 +216,56 @@ expect_seeded() {
 	# The argument's false value is M clear, not "argument present means set":
 	# the frame is byte-identical to push-avp.click.
 	expect 'push-avp-mandatory-false:   32 | 01000020 80000118 00000000 00000001 00000002 00000108 0000000b 61626300'
+}
+
+@test "push-avp-uint32-zero: UINT32 0 is four zero octets, AVP Length 12" {
+	run_click push-avp-uint32-zero.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# A-3: RFC 6733 section 4.2 fixes Unsigned32 at AVP Length 12, so the
+	# frame is 32 octets with a four-octet zero value, not a header-only AVP.
+	expect 'push-avp-uint32-zero:   32 | 01000020 80000118 00000000 00000001 00000002 0000010c 0000000c 00000000'
+}
+
+@test "push-avp-uint32-zero-vendor: UINT32 0 after the vendor header is Length 16" {
+	run_click push-avp-uint32-zero-vendor.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# The same four zero octets after a 12-octet header: AVP Length 16, so the
+	# frame is 36 octets, per the "16 if the V bit is enabled" half of 4.2.
+	expect 'push-avp-uint32-zero-vendor:   36 | 01000024 80000118 00000000 00000001 00000002 0000010c 80000010 0000002a 00000000'
+}
+
+@test "push-avp-empty: no value source keeps the header-only AVP" {
+	run_click push-avp-empty.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# The permitted empty-value case: an empty OCTETSTRING is an 8-octet AVP
+	# with Length 8, the same bytes as the pre-change build. A fix that emits
+	# four octets for every AVP fails here.
+	expect 'push-avp-empty:   28 | 0100001c 80000118 00000000 00000001 00000002 00000108 00000008'
+}
+
+@test "push-avp-empty-vendor: the no-value case after the vendor header is Length 12" {
+	run_click push-avp-empty-vendor.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# The same no-value AVP with the 12-octet vendor header: Length 12 carries
+	# no value, so the frame is 32 octets. "At least 8" is an OctetString rule,
+	# so this shape is only conformant for an OctetString AVP.
+	expect 'push-avp-empty-vendor:   32 | 01000020 80000118 00000000 00000001 00000002 00000108 8000000c 0000002a'
+}
+
+@test "push-avp-no-value: no string and no numeric source is a header-only AVP" {
+	run_click push-avp-no-value.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# The other input the no-value rule covers: neither OCTETSTRING nor a
+	# numeric source is supplied, so the AVP is its 8-octet header alone.
+	expect 'push-avp-no-value:   28 | 0100001c 80000118 00000000 00000001 00000002 00000108 00000008'
+}
+
+@test "push-avp-uint32: a non-zero UINT32 is the four-octet big-endian value" {
+	run_click push-avp-uint32.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# The numeric path the presence rule keys off: UINT32 2001 is 000007d1, so
+	# the AVP Length is 12 and the frame 32 octets.
+	expect 'push-avp-uint32:   32 | 01000020 80000118 00000000 00000001 00000002 0000010c 0000000c 000007d1'
 }
 
 @test "rand-alphanum-one: one generated character, AVP Length 9" {
