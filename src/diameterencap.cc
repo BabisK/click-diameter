@@ -96,10 +96,18 @@ Packet* DiameterEncap::simple_action(Packet * p_in)
 	header.setE2e(ids.nextE2e());
 	header.setLength(DIAMETER_MESSAGE_HEADER_LENGTH + paddedLength);
 
+	// Both extensions can fail: Click returns a null packet and frees the
+	// current one when it cannot allocate the copy. Drop the packet rather than
+	// dereference the result; the frame is not yet well formed, so the only
+	// fault to report is the allocation failure itself.
 	WritablePacket* wp = p_in->push(DIAMETER_MESSAGE_HEADER_LENGTH);
+	if (!wp)
+		return 0;
 	if (paddingLength > 0)
 	{
 		wp = wp->put(paddingLength);
+		if (!wp)
+			return 0;
 		memset(wp->data() + DIAMETER_MESSAGE_HEADER_LENGTH + payloadLength,
 				0, paddingLength);
 	}

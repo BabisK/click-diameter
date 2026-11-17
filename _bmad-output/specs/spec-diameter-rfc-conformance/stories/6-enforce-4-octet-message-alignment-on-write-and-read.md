@@ -3,8 +3,8 @@ title: 'Enforce 4-octet message alignment on write and read'
 type: 'bugfix'
 created: '2026-11-17'
 status: 'done'
-baseline_revision: 'ec0b5f0bf140839b87875a33165b4914cf5e66df'
-review_loop_iteration: 0
+baseline_revision: 'd1db4ab5ea2e8833726cd0346a984ad4dd4aebbc'
+review_loop_iteration: 1
 followup_review_recommended: false
 context: ['{project-root}/AGENTS.md']
 warnings: ['oversized']
@@ -17,7 +17,7 @@ deferred: []
 
 **Problem:** `DiameterEncap` stamps `Length = 20 + payload` with no padding, so `InfiniteSource(DATA \<de ad be ef 00>) -> DiameterEncap(CODE 280, REQUEST true)` emits a 25-octet frame whose Length field says 25. RFC 6733 section 3 requires the Message Length to be a multiple of 4, and the package's own message walkers then reject that frame as a short AVP. On the read side, `diameter_check_header()` compares Length to the packet and never tests alignment, so `DiameterDecap` and every rewriter accept and forward the same frame (finding A-4, CAP-2 and CAP-3).
 
-**Approach:** `DiameterEncap` zero-pads the payload up to a 4-octet boundary and counts the padding in the message Length, mirroring the padding `DiameterAvpEncap` already applies to an AVP value. `diameter_check_header()` gains `DIAMETER_CHECK_LENGTH_NOT_ALIGNED` and rejects a declared Length that is not a multiple of 4, so every element that reads a message inherits the check and no rewriting element can re-emit an unaligned frame.
+**Approach:** `DiameterEncap` zero-pads the payload up to a 4-octet boundary and counts the padding in the message Length, mirroring the padding `DiameterAvpEncap` already applies to an AVP value. `diameter_check_header()` gains `DIAMETER_CHECK_LENGTH_NOT_ALIGNED` and rejects a declared Length that is not a multiple of 4, so every element that reads a message inherits the check and no rewriting element can re-emit an unaligned frame. The pad repairs the header rule only: a payload that is not already a sequence of padded AVPs is not made walkable, and `encap-padding-push-avp.click` pins that limit.
 
 ## Boundaries & Constraints
 
@@ -33,7 +33,8 @@ deferred: []
 | Two pad octets | `DATA \<de ad be ef 00 11>` | 28 octets, Length `0x1c`, payload `de ad be ef 00 11 00 00` | No error expected |
 | One pad octet | `DATA \<de ad be ef 00 11 22>` | 28 octets, Length `0x1c`, payload `de ad be ef 00 11 22 00` | No error expected |
 | Already aligned | a 4-octet payload, or `LENGTH 0` | unchanged: 24 octets / 20 octets, no pad octet | No error expected |
-| Reader accepts the writer | `encap-padding.click` feeds the padded frame into `DiameterDecap` | forwarded as 8 octets, no drop line | No error expected |
+| Header reader accepts the writer | `encap-padding.click` feeds the padded frame into `DiameterDecap` | forwarded as 8 octets, no drop line | No error expected |
+| Padded body is not walkable | `encap-padding-push-avp.click` feeds the same padded frame into `DiameterPushAVP` | dropped, nothing appended: the pad does not form an AVP header | reason `AVP length below its header` |
 | Unaligned declared Length | 25-octet frame, first bytes `01 00 00 19`, into `DiameterDecap` | dropped, no payload forwarded | `DiameterDecap: dropping malformed packet: the Length field is not a multiple of 4` |
 | Unaligned rewriter | the same 25-octet frame into `DiameterPushAVP` | dropped, nothing appended | `DiameterPushAVP: dropping malformed packet: the Length field is not a multiple of 4` |
 | Alignment beats mismatch | 24-octet frame whose Length field says 25 | dropped for the alignment, not the mismatch | reason `the Length field is not a multiple of 4` |
@@ -44,6 +45,12 @@ deferred: []
 </intent-contract>
 
 ## Code Map
+
+- Line numbers were taken at the planning baseline `d1db4ab`; the shipped tree
+  moved them (`DiameterCheck` is at `src/diameter.hh:338-351`,
+  `diameter_check_header()` at `:390-420`, `DiameterEncap::simple_action()` at
+  `src/diameterencap.cc:76-112`). The symbols and the described placement are
+  unchanged.
 
 - `src/diameter.hh:284-296` -- the `DiameterCheck` enum; add `DIAMETER_CHECK_LENGTH_NOT_ALIGNED` immediately before `DIAMETER_CHECK_LENGTH_MISMATCH`, the order in which the checks run. `:298-325` -- `diameter_check_reason()`; a new case is required or the drop prints "unknown validation error".
 - `src/diameter.hh:327-356` -- `diameter_check_header()`; `:339-340` the Version-first test, `:341-342` the short-header guard, `:343-344` the three-octet `declared` parse, `:345-346` the mismatch comparison, `:350-354` the flag tests. The alignment test goes between the parse and the comparison. `:393-404` -- `diameter_check_message()` calls `diameter_check_header()` first, so every message walker inherits the rule; `:415-417` is the padded-bound guard that becomes unreachable once the header requires alignment (keep it).
@@ -87,12 +94,27 @@ deferred: []
 - Given the 25-octet frame whose Length says 25, when `DiameterDecap` or `DiameterPushAVP` sees it, then it is dropped with exactly one line `ELEMENT: dropping malformed packet: the Length field is not a multiple of 4` and nothing reaches `Print`.
 - Given a 24-octet frame whose Length says 25, when a reader sees it, then the reported reason is the alignment, not the mismatch.
 - Given a 10-octet frame declaring 25, when a reader sees it, then the reported reason is the short header, not the alignment; given a Version 2 frame declaring 25, then the reported reason is the Version.
-- Given the pre-change package at `ec0b5f0`, when the six configs whose behaviour changes run, then the three `encap-padding*` configs print 25-, 26- and 27-octet frames with unaligned Lengths, and the three `malformed-length-not-aligned*` configs forward the frame instead of dropping it -- the negative control.
+- Given the pre-change package at `d1db4ab`, when the six configs whose behaviour changes run, then the three `encap-padding*` configs print 25-, 26- and 27-octet frames with unaligned Lengths, and the three `malformed-length-not-aligned*` configs forward the frame instead of dropping it -- the negative control. Given the same package, `encap-padding-push-avp` reports the short AVP header rather than the padded body's below-header length.
 - Given the installed prefix, when the five message-reader pages are inspected, then each names `the Length field is not a multiple of 4` and the `DiameterEncap` page states the zero padding.
 
 ## Spec Change Log
 
 ## Review Triage Log
+
+### 2026-11-17 — Verification review of stories 3-9
+
+The shipped alignment rule and padding were reviewed against the tree on
+`spec/diameter-rfc-conformance` (adversarial, edge-case and verification-gap
+lenses; findings V-1 through V-13 in
+`_bmad-output/specs/spec-diameter-conformance-verification/findings.md`).
+Story 6's entries:
+
+- `[patched]` The rationale "so the package cannot emit a frame its own readers reject" was false for the repro: the padded 5-octet body still fails the AVP walk with `AVP length below its header`, and only the header reader accepts it. Added `encap-padding-push-avp.click`, the Encap-page limit and the README sentence; the padding decision itself is unchanged because `SPEC-diameter-rfc-conformance` CAP-2 fixes it.
+- `[patched]` The new `put()` (and the existing `push()`) on the padding path dereferenced null on allocation failure; both now return 0.
+- `[patched]` The record said "no implementation was started"; this record replaces it with the suite count at the shipped tree.
+- `[patched]` The recorded `(payloadLength + 4) & ~3u` mutation is identical to the real formula for residues 1-3 and could never fail the padding configs; replaced with `(payloadLength + 2) & ~3u`.
+- `[rejected]` The padded-bound guard is unreachable once the header requires an aligned Length. It stays as defence in depth with a comment, which is what this story's `Never` requires.
+- `[rejected]` The negative control cited `ec0b5f0`, which is not on the branch; the equivalent pre-change tree is `d1db4ab` (installed in `/tmp/opencode/s8b-base-prefix`), and its measured output matches the expected 25/26/27-octet frames.
 
 ## Design Notes
 
@@ -100,7 +122,7 @@ Padding is mandated over rejection for two reasons. RFC 6733 section 3 defines L
 
 The writer arithmetic is `paddedLength = (payloadLength + 3) & ~3u`; `paddingLength = paddedLength - payloadLength`, then `put(paddingLength)` and `memset` mirror `DiameterAvpEncap::simple_action()`. The pad is part of the message, so `DiameterDecap` forwards it with the payload: a stateless decapsulator has no record of the original unpadded length, and that is exactly what the RFC means by padding the message. The new config prints both halves so the behaviour is pinned rather than implied.
 
-Alignment is tested before the packet-length comparison, for the same reason the Version is tested first: a Length field that is not a multiple of 4 cannot describe a Diameter message at any packet length, so comparing it to the packet would report a field of a message the reader has already rejected. It stays below the short-header guard, which both keeps the three-octet parse from reading past a short packet and makes a short frame report the short-header reason; `malformed-short-not-aligned.click` pins that side of the ordering. An aligned frame whose Length disagrees with the packet keeps `header Length does not match packet length`, which `malformed-decap-length` and `malformed-length-short` already pin. An aligned frame whose Length disagrees with the packet keeps `header Length does not match packet length`, which `malformed-decap-length` and `malformed-length-short` already pin.
+Alignment is tested before the packet-length comparison, for the same reason the Version is tested first: a Length field that is not a multiple of 4 cannot describe a Diameter message at any packet length, so comparing it to the packet would report a field of a message the reader has already rejected. It stays below the short-header guard, which both keeps the three-octet parse from reading past a short packet and makes a short frame report the short-header reason; `malformed-short-not-aligned.click` pins that side of the ordering. An aligned frame whose Length disagrees with the packet keeps `header Length does not match packet length`, which `malformed-decap-length` and `malformed-length-short` already pin.
 
 Consequence worth recording: once the header guarantees a 4-multiple and the walk advances by padded lengths, `paddedLength > length - offset` in `diameter_check_message()` can no longer be true, because both sides are 4-multiples and the AVP Length is at most the remaining octets. The padded-bound guard therefore becomes defence in depth rather than a reachable branch; it stays, per the story's scope, and `malformed-avp-padding-overhang.click` now pins the header rule that outranks it. `malformed-avp-trailing-octets.click` is re-framed to 32 octets so the reachable partial-header branch keeps its own test.
 
@@ -110,10 +132,10 @@ The three-octet Length ceiling in `DiameterEncap` is still unguarded (story 8 re
 
 **Commands:**
 - `autoconf && ./configure --with-click=/tmp/opencode/click-mt --prefix=/tmp/opencode/click-mt && make CXXFLAGS="-g -O2 -Wall -Wextra -fPIC -shared" && make install` -- expected: builds with no warnings under `-Wall -Wextra`
-- `CLICK=/tmp/opencode/click-mt/bin/click /tmp/opencode/bats-core/bin/bats --tap tests` -- expected: every test passes, including the eight new ones
+- `CLICK=/tmp/opencode/click-mt/bin/click /tmp/opencode/bats-core/bin/bats --tap tests` -- expected: every test passes, including the nine new ones
 - `CLICK=/tmp/opencode/click-mt/bin/click /tmp/opencode/bats-core/bin/bats --tap --filter 'padding|not-aligned' tests` -- expected: the new and changed configs pass together
-- Negative control: install the package at `ec0b5f0` into a second prefix and run the six configs whose behaviour changes with `CLICKPATH=<second prefix>/lib`, because a Click binary built with `--prefix` resolves the package from its own tree rather than from `CLICKPATH` alone -- expected: the padding configs print 25, 26 and 27 octets with Lengths `000019`, `00001a` and `00001b`, and the three `malformed-length-not-aligned*` configs forward frames instead of dropping
-- Mutation checks: delete the alignment test -- expected: the three `malformed-length-not-aligned*` configs and `malformed-avp-padding-overhang` fail; move it after the mismatch comparison -- expected: `malformed-length-not-aligned-mismatch` fails; hoist it above the short-header guard -- expected: `malformed-short-not-aligned` fails; change the padding formula to `(payloadLength + 4) & ~3u` or to truncation -- expected: the `encap-padding*` configs fail on length; drop the `memset` -- expected: the pad octets are not zero and the configs fail; restore and rerun green
+- Negative control: install the package at `d1db4ab` into a second prefix and run the six configs whose behaviour changes with `CLICKPATH=<second prefix>/lib`, because a Click binary built with `--prefix` resolves the package from its own tree rather than from `CLICKPATH` alone -- expected: the padding configs print 25, 26 and 27 octets with Lengths `000019`, `00001a` and `00001b`, and the three `malformed-length-not-aligned*` configs forward frames or drop for another reason instead
+- Mutation checks: delete the alignment test -- expected: the three `malformed-length-not-aligned*` configs and `malformed-avp-padding-overhang` fail; move it after the mismatch comparison -- expected: `malformed-length-not-aligned-mismatch` fails; hoist it above the short-header guard -- expected: `malformed-short-not-aligned` fails; change the padding formula to `(payloadLength + 2) & ~3u` or to truncation -- expected: the `encap-padding*` configs fail on length (note `(payloadLength + 4) & ~3u` is identical for residues 1-3 and only fails an aligned payload, so it is not a discriminating mutation); drop the `memset` -- expected: the pad octets are not zero and the configs fail; restore and rerun green
 - `man -M /tmp/opencode/click-mt/share/man DiameterEncap` (and the five reader pages) -- expected: the padding rule and the alignment reason are present
 
 **Environment:** `/tmp/opencode/click-mt` is Click 2.1 built with `--enable-user-multithread` and already carries the story-8 package; `/tmp/opencode/bats-core/bin/bats` is bats-core 1.14.
@@ -122,4 +144,21 @@ The three-octet Length ceiling in `DiameterEncap` is still unguarded (story 8 re
 
 Status: done
 
-Planning only: the invocation directed a halt after planning, so no source, test or documentation file was changed by this run. The implementation tasks above are unstarted; the next run resumes from this file at `ready-for-dev`.
+**Change.** `DiameterEncap` zero-pads the payload to a 4-octet boundary and counts the pad in the Message Length; `diameter_check_header()` rejects a declared Length that is not a multiple of 4, so every message reader inherits the alignment rule and no rewriter can re-emit an unaligned frame. The pad repairs the header rule only: a body that is not already a sequence of padded AVPs is still dropped by the AVP readers, and `encap-padding-push-avp.click` pins that limit.
+
+**Files changed.**
+- `src/diameter.hh` -- `DIAMETER_CHECK_LENGTH_NOT_ALIGNED`, its reason, the alignment test between the Length parse and the mismatch comparison, and the two function comments.
+- `src/diameterencap.cc` -- the pad arithmetic, `put()` and `memset`, and the null checks on `push()`/`put()`.
+- `src/diameterencap.hh`, `src/diameterdecap.hh`, `src/diameterfliprequest.hh`, `src/diameterpopavp.hh`, `src/diameterpopstorepushavp.hh`, `src/diameterpushavp.hh` -- the padding rule and the alignment reason in each drop list, in check order.
+- `tests/configs/encap-padding*.click` (three residues plus the padded-body drop), `malformed-length-not-aligned*.click` (three orderings), `malformed-version-not-aligned.click`, `malformed-short-not-aligned.click`, and the re-framed `malformed-avp-trailing-octets.click` / re-commented `malformed-avp-padding-overhang.click`.
+- `tests/smoke.bats`, `tests/manpages.bats`, `tests/README.md`, `README.md` -- the tests, the page assertions and the indexes.
+
+**Verification (at this tree).**
+- `-Wall -Wextra`: clean build, no diagnostics.
+- `CLICK=/tmp/opencode/click-mt/bin/click bats --tap tests`: 152/152, exit 0.
+- The eight story-6 tests and `encap-padding-push-avp` pass together.
+- Negative control against the `d1db4ab` package in `/tmp/opencode/s8b-base-prefix/lib`: `encap-padding`/`-two`/`-one` print 25/26/27 octets with Lengths `000019`/`00001a`/`00001b`; `malformed-length-not-aligned` forwards `deadbeef 00`; `-pushavp` drops with `packet shorter than the 8-octet AVP header`; `-mismatch` drops with `header Length does not match packet length`.
+- On the shipped tree the padded frame through `DiameterPushAVP` drops with `AVP length below its header`, while `DiameterDecap` forwards the 8 padded octets.
+- Installed pages carry the padding rule and the alignment reason, and `tests/manpages.bats` enforces them.
+
+**Residual risks.** The padded-body limitation is documented and pinned rather than repaired: making an arbitrary payload walkable is outside this story. The three-octet Length ceiling in `DiameterEncap` remains deferred (DW-4).

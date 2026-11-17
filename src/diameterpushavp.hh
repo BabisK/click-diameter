@@ -36,8 +36,8 @@ rather than rewritten: the element prints one
 C<DiameterPushAVP: dropping malformed packet: REASON> line when the Version
 field is not 1, when the packet is shorter than the 20-octet header, when its
 Length field is not a multiple of 4, when its Length field does not equal the
-packet length, when an AVP in it is malformed or runs past the message end, or
-when the flags are illegal for the message type.
+packet length, when the flags are illegal for the message type, or when an AVP
+in it is malformed or runs past the message end.
 
 An append that would push the message Length past three octets is dropped too,
 with its own line: C<DiameterPushAVP: dropping packet: appending the AVP would

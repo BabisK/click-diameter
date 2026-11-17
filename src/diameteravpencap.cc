@@ -54,10 +54,16 @@ Packet* DiameterAvpEncap::simple_action(Packet * p_in)
 	header.setLength(headerLength + valueLength);
 	const uint32_t paddingLength = header.getLengthPadded() - header.getLength();
 
+	// As in DiameterEncap: a failed extension returns null and frees the
+	// packet, so the packet is dropped instead of dereferenced.
 	WritablePacket* wp = p_in->push(headerLength);
+	if (!wp)
+		return 0;
 	if (paddingLength > 0)
 	{
 		wp = wp->put(paddingLength);
+		if (!wp)
+			return 0;
 		memset(wp->data() + headerLength + valueLength, 0, paddingLength);
 	}
 	header.encode(wp->data());

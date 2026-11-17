@@ -15,9 +15,13 @@
 # two packets of a run to differ, a rewritten seed to change the octets, and a
 # rerun over a second later to reproduce the first run byte for byte, so a
 # clock-seeded stream fails. The identifiers-* configs run 240 000 messages in
-# Click's simulated time and require every hop-by-hop and end-to-end value to be
-# distinct, no frame whose two identifiers agree, and a byte-identical rerun, so
-# a per-packet draw's birthday collisions fail the run. The rand-* tests pin the
+# Click's simulated time, and one 1 048 577-message run crosses the 2^20
+# end-to-end carry; they require every hop-by-hop and end-to-end value to be
+# distinct, consecutive, and never equal to the other field of the same frame
+# (compared as strings), plus a byte-identical rerun where the run repeats, so a
+# per-packet draw's birthday collisions and a counter that skips a value fail
+# the run. randomness-encap-push-avp pins the stream position a seeded writer
+# leaves for a downstream RAND* consumer. The rand-* tests pin the
 # length and the alphabet of each DiameterPushAVP generator. The push-avp-vendor*
 # configs pin the V=1 header bytes and the refusal of a zero Vendor-Id. The
 # push-avp-uint32* configs pin A-3: a zero numeric value is a four-octet value at
@@ -35,7 +39,10 @@
 # section 4.1 and the rule that the decoder derives padding from Length alone.
 # The encap-padding* tests pin the message-level twin from section 3:
 # DiameterEncap zero-pads the payload to a 4-octet boundary and counts the pad in
-# the Message Length, and DiameterDecap forwards the pad with the payload. The
+# the Message Length, and DiameterDecap forwards the pad with the payload.
+# encap-padding-push-avp pins the limit of that repair: a padded body that is
+# not an AVP sequence is still dropped by an AVP reader, so the pad satisfies
+# the header rule only. The
 # malformed-* tests assert the drop path instead: exit 0, one warning naming the
 # element and reason, and no Print line. They cover a bad Version, a short
 # packet, an unaligned or mismatched Length, an over-long or malformed AVP, a V
@@ -83,14 +90,14 @@ run_click() {
 	run_config "$BATS_TEST_DIRNAME/configs/$1"
 }
 
-# run_click_simtime CONFIG -- run configs/CONFIG in Click's simulated time, so
-# a rate-shaped config reaches its LIMIT in a fraction of the wall-clock time
-# while keeping the story's rate. The timeout still bounds the run.
+# run_click_simtime CONFIG OUTFILE -- run configs/CONFIG in Click's simulated
+# time with stdout and stderr written straight to OUTFILE, so a million-line run
+# never becomes a shell variable. Sets $status; the timeout still bounds the run.
 run_click_simtime() {
 	if command -v timeout >/dev/null 2>&1; then
-		run timeout "$click_timeout" "$click" --simtime "$BATS_TEST_DIRNAME/configs/$1"
+		timeout "$click_timeout" "$click" --simtime "$BATS_TEST_DIRNAME/configs/$1" >"$2" 2>&1 && status=0 || status=$?
 	else
-		run "$click" --simtime "$BATS_TEST_DIRNAME/configs/$1"
+		"$click" --simtime "$BATS_TEST_DIRNAME/configs/$1" >"$2" 2>&1 && status=0 || status=$?
 	fi
 }
 
@@ -150,14 +157,18 @@ expect_configure_failure() {
 	[[ "$output" == $expected ]] || { echo "expected: $expected"; echo "got: $output"; return 1; }
 }
 
-# expect_seeded CONFIG LENGTH -- the RandomSeed(SEED 12345) contract for
-# configs/CONFIG: rejection of a clock-seeded stream. Each of the two packets in
-# the run must be LENGTH octets and the two must differ, because the stream
-# advances rather than repeating one value. A copy with the seed rewritten must
-# print different octets, so the seed rather than the clock or a constant
-# decides. A rerun more than a second later must reproduce the first run byte
-# for byte; two wall-clock-seeded runs in the same second agree, so the sleep is
-# what makes a reseeded stream fail here instead of passing by accident.
+# expect_seeded CONFIG LENGTH [FIRST_FRAME] -- the RandomSeed(SEED 12345)
+# contract for configs/CONFIG: rejection of a clock-seeded stream. Each of the
+# two packets in the run must be LENGTH octets and the two must differ, because
+# the stream advances rather than repeating one value. A copy with the seed
+# rewritten must print different octets, so the seed rather than the clock or a
+# constant decides. A rerun more than a second later must reproduce the first
+# run byte for byte; two wall-clock-seeded runs in the same second agree, so the
+# sleep is what makes a reseeded stream fail here instead of passing by
+# accident. An optional third argument pins the first frame literally, so a
+# change to the seed arithmetic or to the number of draws the writer consumes
+# fails here; the bytes are Click's RNG output for SEED 12345, reproducible by
+# design, not a libc-independent constant.
 expect_seeded() {
 	local config="$BATS_TEST_DIRNAME/configs/$1"
 	run_config "$config"
@@ -170,6 +181,9 @@ expect_seeded() {
 	lengths=$(awk '{ print $2 }' <<<"$first_run" | sort -u)
 	[ "$lengths" = "$2" ] || { echo "expected $2-octet packets, got lengths: $lengths"; return 1; }
 	[ "${lines[0]}" != "${lines[1]}" ] || { echo "expected the two packets to differ"; return 1; }
+	if [ "$#" -ge 3 ]; then
+		[ "${lines[0]}" = "$3" ] || { echo "expected the first frame to be: $3"; return 1; }
+	fi
 
 	local other="$BATS_TEST_TMPDIR/$1"
 	sed -E 's/(RandomSeed\(SEED )[0-9]+\)/\154321)/' "$config" >"$other"
@@ -187,38 +201,78 @@ expect_seeded() {
 	[ "$output" = "$first_run" ] || { echo "expected the rerun to reproduce the first run byte for byte"; return 1; }
 }
 
-# expect_unique_identifiers CONFIG COUNT -- the identifier-counter contract for
-# configs/CONFIG, run in Click's simulated time: exactly COUNT printed frames,
-# COUNT distinct hop-by-hop values, COUNT distinct end-to-end values, no frame
-# whose two identifiers agree, and a byte-identical second run. A per-packet
-# draw repeats within COUNT values, a counter that starts both fields at one
-# value leaves the first frame with equal identifiers, and a clock-seeded start
-# cannot reproduce the second run, so each assertion names one way to break the
-# guarantee. Print puts hop-by-hop in field 7 and end-to-end in field 8.
-expect_unique_identifiers() {
+# expect_identifier_run CONFIG COUNT [OUTFILE] -- one run of configs/CONFIG in
+# Click's simulated time, asserting the identifier-counter contract: exactly
+# COUNT printed frames, COUNT distinct hop-by-hop and end-to-end values, no frame
+# whose two identifiers are equal as strings, and a consecutive sequence in each
+# field. A per-packet draw repeats within COUNT values; a counter that skips a
+# value (one stepped on a refused token, say) still has COUNT distinct values but
+# fails the consecutive check; a clock-seeded start cannot reproduce a second
+# run, which expect_unique_identifiers checks. Print puts hop-by-hop in field 7
+# and end-to-end in field 8.
+expect_identifier_run() {
 	local count="$2"
-	run_click_simtime "$1"
+	# No shell variable holds the frames: the wrap run prints 1 048 577 lines, and
+	# copying that string into every awk call would dominate the test.
+	local frames_file="${3:-$BATS_TEST_TMPDIR/identifier-frames}"
+	run_click_simtime "$1" "$frames_file"
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
-	local first_run="$output"
-	local frames distinct_hbh distinct_e2e equal
-	frames=$(wc -l <<<"$first_run")
+	# One pass computes the frame count, both distinct counts, the equal-pair
+	# count and the first and last value of each field. Array subscripts are
+	# strings, so the counts are string counts.
+	local frames distinct_hbh distinct_e2e equal first_hbh last_hbh first_e2e last_e2e stats
+	stats=$(awk '
+		{
+			frames++
+			if (frames == 1) { f7 = $7; f8 = $8 }
+			l7 = $7; l8 = $8
+			seen7[$7] = 1
+			seen8[$8] = 1
+			if (($7 "") == ($8 "")) equal++
+		}
+		END {
+			n7 = 0; for (k in seen7) n7++
+			n8 = 0; for (k in seen8) n8++
+			print frames, n7, n8, equal + 0, f7, l7, f8, l8
+		}' "$frames_file")
+	read -r frames distinct_hbh distinct_e2e equal first_hbh last_hbh first_e2e last_e2e <<<"$stats"
 	[ "$frames" -eq "$count" ] || { echo "expected $count frames, got $frames"; return 1; }
-	distinct_hbh=$(awk '{ print $7 }' <<<"$first_run" | sort -u | wc -l)
 	[ "$distinct_hbh" -eq "$count" ] || {
 		echo "expected $count distinct hop-by-hop values, got $distinct_hbh"
 		return 1
 	}
-	distinct_e2e=$(awk '{ print $8 }' <<<"$first_run" | sort -u | wc -l)
 	[ "$distinct_e2e" -eq "$count" ] || {
 		echo "expected $count distinct end-to-end values, got $distinct_e2e"
 		return 1
 	}
-	equal=$(awk '$7 == $8' <<<"$first_run" | wc -l)
 	[ "$equal" -eq 0 ] || { echo "expected no frame with equal identifiers, got $equal"; return 1; }
 
-	run_click_simtime "$1"
+	# COUNT distinct values in COUNT frames plus a span of COUNT - 1 proves the
+	# sequence steps by exactly one: a value consumed elsewhere leaves a hole and
+	# widens the span. 16# parses eight hex digits into 32 bits, and the mask
+	# covers a wrap inside the run.
+	local span
+	span=$(( (16#$last_hbh - 16#$first_hbh) & 0xFFFFFFFF ))
+	[ "$span" -eq "$((count - 1))" ] || {
+		echo "hop-by-hop values are not consecutive: $first_hbh to $last_hbh over $count frames"
+		return 1
+	}
+	span=$(( (16#$last_e2e - 16#$first_e2e) & 0xFFFFFFFF ))
+	[ "$span" -eq "$((count - 1))" ] || {
+		echo "end-to-end values are not consecutive: $first_e2e to $last_e2e over $count frames"
+		return 1
+	}
+}
+
+# expect_unique_identifiers CONFIG COUNT -- the single-run contract above plus a
+# byte-identical second run, so a clock-seeded start fails.
+expect_unique_identifiers() {
+	local first="$BATS_TEST_TMPDIR/identifier-frames-first"
+	local second="$BATS_TEST_TMPDIR/identifier-frames-second"
+	expect_identifier_run "$1" "$2" "$first" || return 1
+	run_click_simtime "$1" "$second"
 	[ "$status" -eq 0 ] || { echo "click exit $status on the rerun"; return 1; }
-	[ "$output" = "$first_run" ] || { echo "expected the rerun to reproduce the first run byte for byte"; return 1; }
+	cmp -s "$first" "$second" || { echo "expected the rerun to reproduce the first run byte for byte"; return 1; }
 }
 
 @test "push-avp: appending an AVP, header length updated" {
@@ -793,6 +847,14 @@ decap: +8 \| deadbeef 00000000$'
 	[[ "$output" =~ $expected ]] || { echo "expected: 28 octets, Length 0x1c, deadbeef 00112200"; return 1; }
 }
 
+@test "encap-padding-push-avp: a padded non-AVP body is still dropped by an AVP reader" {
+	run_click encap-padding-push-avp.click
+	# The pad satisfies the header's Length rule only. The padded body is not an
+	# AVP sequence (its fifth octet is data, not a length), so DiameterPushAVP
+	# drops it: padding does not make an arbitrary payload walkable.
+	expect_drop DiameterPushAVP 'AVP length below its header'
+}
+
 @test "encap-decap: the encapsulated payload survives Decap without a drop" {
 	run_click encap-decap.click
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
@@ -920,11 +982,18 @@ pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
 }
 
 @test "randomness-encap: RandomSeed reproduces the identifiers across runs" {
-	expect_seeded randomness-encap.click 24
+	# The literal first frame pins the two seed draws and the number of draws the
+	# writer consumes: 16d5a847 and 3328a195 are Click's random() output for
+	# SEED 12345, so a moved stream or changed seed arithmetic fails here.
+	expect_seeded randomness-encap.click 24 \
+		'encap:   24 | 01000018 80000118 00000000 16d5a847 3328a195 deadbeef'
 }
 
 @test "randomness-rated-source: RandomSeed reproduces the identifiers across runs" {
-	expect_seeded randomness-rated-source.click 20
+	# Same two draws, same first frame: the first emitted message takes the
+	# first two draws, so the token bucket has not consumed an identifier first.
+	expect_seeded randomness-rated-source.click 20 \
+		'rated-source:   20 | 01000014 80000118 0000002a 16d5a847 3328a195'
 }
 
 @test "randomness-push-avp: RandomSeed reproduces the generated value across runs" {
@@ -945,6 +1014,22 @@ pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
 
 @test "identifiers-rated-source-unique: the same counts through the token bucket" {
 	expect_unique_identifiers identifiers-rated-source-unique.click 240000
+}
+
+@test "identifiers-encap-wrap: the 2^20 end-to-end carry keeps both fields consecutive" {
+	# One run only: 1 048 577 messages crosses the 20-bit boundary once, so the
+	# high-order 12 bits must carry. Distinctness, string equality and the
+	# consecutive span all fail if the low 20 bits are masked without carry.
+	expect_identifier_run identifiers-encap-wrap.click 1048577
+}
+
+@test "randomness-encap-push-avp: a seeded writer leaves the RAND* stream at a fixed position" {
+	run_click randomness-encap-push-avp.click
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# Frame 1 carries the two seed draws, so the appended value is the third
+	# draw; frame 2 carries the next counters and the next draw. A changed seed
+	# arithmetic or a different number of draws per message moves these bytes.
+	expect $'mix:   44 | 0100002c 80000118 00000000 16d5a847 3328a195 00000108 00000008 00000108 00000010 44423130 31453838\nmix:   44 | 0100002c 80000118 00000000 16d5a848 3328a196 00000108 00000008 00000108 00000010 42313935 45353230'
 }
 
 @test "popstorepush-roundtrip: unpadded AVP pop then push restores the message" {

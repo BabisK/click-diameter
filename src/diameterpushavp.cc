@@ -232,7 +232,11 @@ Packet* DiameterPushAVP::simple_action(Packet * p_in)
 		return 0;
 	}
 
+	// put() returns null and frees the packet when its copy cannot be
+	// allocated, so a maximal append is dropped rather than dereferenced.
 	WritablePacket *p = p_in->put(avpLengthPadded);
+	if (!p)
+		return 0;
 
 	DiameterHeader dh;
 	dh.decode(p->data());

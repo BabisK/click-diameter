@@ -220,10 +220,11 @@ output. The `malformed-*` configs assert the drop path instead — exit 0, one
 warning naming the element and reason, and no `Print` line — and
 `push-avp-length-overflow.click` asserts the other drop shape: a well-formed
 message whose appended AVP would push the Length past three octets is dropped
-rather than wrapped, with a warning naming the append. The two rejected
-`DiameterEncap` flag configs and the CODE-range configs in both writers assert a
-configure failure: non-zero exit, the named argument in the error, and no
-`Print` line. `tests/manpages.bats` reads
+rather than wrapped, with a warning naming the append. Fourteen configs assert a
+configure failure: the two `DiameterEncap` flag pairs, the two `VENDORSPEC` and
+`VENDOR` refusals, six `DiameterPushAVP` value-source conflicts, and the
+CODE-range configs in both writers. Each expects a non-zero exit, the named
+argument in the error, and no `Print` line. `tests/manpages.bats` reads
 the prefix the Click binary lives in and asserts one page per element, with its
 arguments, handlers and the package element list, whose entries sit under a
 known category with a summary; it also checks that the six readers document
@@ -256,7 +257,10 @@ Messages are padded the same way. RFC 6733 §3 defines the Message Length as
 covering the header and the padded AVPs, so it is always a multiple of 4;
 `DiameterEncap` zero-pads its payload to that boundary and counts the pad in the
 Length, and `DiameterDecap` forwards the pad with the payload because the pad is
-part of the message. A payload already on the boundary gains no octet. A
+part of the message. A payload already on the boundary gains no octet. Padding
+repairs the header rule only: a payload that is not already a sequence of padded
+AVPs does not become walkable, and an AVP reader drops it
+(`encap-padding-push-avp` pins the drop). A
 received Length that is not a multiple of 4 is rejected by every message
 reader with `the Length field is not a multiple of 4`.
 
@@ -308,13 +312,18 @@ config then emit the same octets. The identifiers are counters rather than
 draws: each field is unique for the first 2^32 messages of a run, so a repeated
 hop-by-hop or end-to-end value means a wrap, not the birthday collision a 32-bit
 draw reaches in a few hundred thousand messages, and the counters are atomic, so
-two router threads never share a value. The end-to-end field keeps RFC 6733 §3's
-shape: its high-order 12 bits are the epoch, which advances when the low-order
-20 bits wrap, and the seed chooses the starting epoch instead of the clock, which
-is what keeps the run reproducible. A new run starts a new sequence from its
-seed; nothing is claimed across reboots. The `RAND*` generators consume the
-stream on every draw, so successive values differ; without a seed every value
-comes from Click's own seed and varies from run to run. Reproduction assumes a
+two router threads never share a value. The end-to-end field is a 32-bit counter
+presented with a twelve/twenty split: its high-order 12 bits advance when the
+low-order 20 bits wrap. RFC 6733 §3 only permits a reboot-time value in the high
+half and a random value in the low half; this package reads neither and the seed
+chooses both starting values, which is what keeps the run reproducible. A new
+run starts a new sequence from its seed; nothing is claimed across reboots. A
+seeded writer now consumes two draws at initialization instead of two per
+message, so a configuration that pairs it with a `RAND*` generator moves that
+generator's values from the second message on; `randomness-encap-push-avp` pins
+the new stream position. The `RAND*` generators consume the stream on every
+draw, so successive values differ; without a seed every value comes from Click's
+own seed and varies from run to run. Reproduction assumes a
 single thread or a fixed order for the `RAND*` draws: a multi-threaded router's
 interleaving is not fixed by the seed, although the counters still hand out
 distinct values.
