@@ -37,11 +37,11 @@ stores nothing, so the next packet is treated as another first packet.
 
 A malformed packet is dropped rather than rewritten: the element prints one
 C<DiameterPopStorePushAVP: dropping malformed packet: REASON> line when the
-packet is shorter than the 20-octet header, when its Length field does not
-equal the packet length, when an AVP in it is malformed or runs past the
-message end, or when the flags are illegal for the message type. A drop sends
-nothing to either output and leaves the store as it was. The element takes no
-arguments.
+Version field is not 1, when the packet is shorter than the 20-octet header,
+when its Length field does not equal the packet length, when an AVP in it is
+malformed or runs past the message end, or when the flags are illegal for the
+message type. A drop sends nothing to either output and leaves the store as it
+was. The element takes no arguments.
 
 =a
 

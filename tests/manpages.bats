@@ -165,6 +165,20 @@ expect_element_page() {
 			return 1
 		}
 	done
+	# A-5: the five readers that take a message name the bad-Version reason, so a
+	# doc-only regression in the new drop path fails here. DiameterAvpDecap is
+	# not one of them: an AVP carries no Version field. The page keeps the
+	# header's line breaks, so flatten the description before matching.
+	for element in DiameterDecap DiameterFlipRequest DiameterPushAVP \
+	    DiameterPopAVP DiameterPopStorePushAVP; do
+		text=$(page "$element") || return 1
+		description=$(section DESCRIPTION <<<"$text")
+		local flat=${description//$'\n'/ }
+		grep -qF 'the Version field is not 1' <<<"$flat" || {
+			echo "$element: DESCRIPTION does not name the bad-Version reason"
+			return 1
+		}
+	done
 }
 
 @test "manpages: the two pop elements document the no-AVP no-op" {

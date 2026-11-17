@@ -32,6 +32,10 @@ naming the reason:
 
 =item *
 
+the Version field is not 1;
+
+=item *
+
 the packet is shorter than the 20-octet header;
 
 =item *

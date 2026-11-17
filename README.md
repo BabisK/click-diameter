@@ -236,7 +236,7 @@ Malformed input is dropped, never forwarded. The six elements that read a
 received frame — `DiameterDecap`, `DiameterAvpDecap`, `DiameterFlipRequest`,
 `DiameterPushAVP`, `DiameterPopAVP` and `DiameterPopStorePushAVP` — validate it
 first and drop it with one `ELEMENT: dropping malformed packet: REASON` line per
-packet: the five that read a message check its Length and flags, and
+packet: the five that read a message check its Version, Length and flags, and
 `DiameterAvpDecap` checks the AVP framing it is handed. Drops are not throttled:
 a hostile source can flood the log, and that is accepted.
 
@@ -263,15 +263,16 @@ because the element has no request to consult. `DiameterFlipRequest` clears R
 and T together when it turns a request into an answer, and sets R and clears E
 when it turns an answer into a request, keeping P in both directions.
 
-Every element that reads a message validates the flags alongside its Length
-check, so a received frame carrying E on a request or T on an answer is dropped
-with one warning naming the flag. The flip is the one reader that also rewrites
-flags: it validates at the door, so a T-bearing answer is dropped rather than
-repaired into a request, while an E-bearing answer is legal input and has its E
-cleared on the way out. P on either type, E on an answer and T on a request are
-not errors, so the readers that only validate forward them unchanged. T on a
-request is never rejected: §3 allows it only as a retransmission marker, and a
-stateless element cannot judge that.
+Every element that reads a message validates the flags alongside its Version
+and Length checks, so a received frame carrying a Version other than 1, E on a
+request or T on an answer is dropped with one warning naming the fault. The flip
+is the one reader that also rewrites flags: it validates at the door, so a
+T-bearing answer is dropped rather than repaired into a request, while an
+E-bearing answer is legal input and has its E cleared on the way out. P on
+either type, E on an answer and T on a request are not errors, so the readers
+that only validate forward them unchanged. T on a request is never rejected: §3
+allows it only as a retransmission marker, and a stateless element cannot judge
+that.
 
 Randomness
 ----------
