@@ -52,7 +52,7 @@ A pain to solve, with a correctness mandate behind it. The package builds, parse
 
 ## Success signal
 
-On the baseline Click install, the package builds with zero warnings, every A-1 through A-10 repro config fails before its fix and passes after, and the full `tests/configs/` suite exits 0. Well-formed input produces the same bytes it does today, except where a caller opts into `MANDATORY`.
+On the baseline Click install, the package builds with zero warnings, every A-1 through A-10 repro config fails before its fix and passes after, and the full `tests/configs/` suite exits 0. Well-formed input produces the same bytes it does today, except where a caller opts into `MANDATORY`, or pairs a seeded writer with a `RAND*` generator: the identifier counters consume two draws at initialization instead of two per message, so that generator's values move from the second message on (`randomness-encap-push-avp` pins the new bytes).
 
 ## Assumptions
 

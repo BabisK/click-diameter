@@ -1,0 +1,19 @@
+- id: "1"
+  title: Repair the story 3-9 verification layer
+  description: >-
+    Make the identifier tests measure identifiers (string equality,
+    consecutiveness, seeded first frame, 2^20 carry), check every buffer
+    extension in the writer data paths, correct the public claims that
+    contradict the tree, and record stories 6 and 9 plus the deferred ledger
+    truthfully, satisfying CAP-1 through CAP-4.
+  invoke_dev_with: >-
+    Work directly on spec/diameter-rfc-conformance and land it in one pull
+    request. Findings with evidence are in findings.md (V-1 through V-13).
+    Keep the wire format unchanged: the only behaviour change is the
+    allocation-failure null check. Do not change the padding decision or the
+    encap-padding bytes. Keep the man-page phrases `seeded once from
+    click_random()` and `unique for the first 2^32 messages of a run`. Prove the
+    new checks discriminate: the advance-on-refusal and seed+1 mutants must
+    fail, and the pre-change package must fail the first-frame and
+    consecutiveness assertions. Build with `-Wall -Wextra` and run the whole
+    bats suite.

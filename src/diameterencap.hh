@@ -26,15 +26,20 @@ the Application-Id APPID, and hop-by-hop and end-to-end identifiers. Each
 identifier is seeded once from click_random() when the element is initialized and
 then advanced by one for every message the element emits, so each field is unique
 for the first 2^32 messages of a run and RandomSeed reproduces the sequence byte
-for byte. The end-to-end field keeps RFC 6733 section 3's twelve/twenty split:
-its high-order 12 bits are the epoch, which advances when the low-order 20 bits
-wrap, and the seed chooses the starting epoch rather than the clock. A new run
-starts a new sequence from its seed; nothing is claimed across reboots. RFC 6733
-section 3 requires the Message Length to be a multiple of 4, so the payload is
-zero-padded up to a 4-octet boundary and the pad octets count in the Length: a
-5-octet payload gains three zero pad octets and Length 28, while a payload
-already on the boundary gains none and keeps its bytes. The pad is part of the
-message, so DiameterDecap forwards it along with the payload.
+for byte. The end-to-end field is a 32-bit counter presented with a twelve/
+twenty split: its high-order 12 bits advance when the low-order 20 bits wrap.
+RFC 6733 section 3 only permits a reboot-time value in the high half and a random
+value in the low half; this element reads neither, and the seed chooses both
+starting values. A new run starts a new sequence from its seed; nothing is
+claimed across reboots. RFC 6733 section 3 requires the Message Length to be a
+multiple of 4, so the payload is zero-padded up to a 4-octet boundary and the pad
+octets count in the Length: a 5-octet payload gains three zero pad octets and
+Length 28, while a payload already on the boundary gains none and keeps its
+bytes. The pad is part of the message, so DiameterDecap forwards it along with
+the payload. Padding satisfies the Length rule only: a payload that is not
+already a sequence of padded AVPs is not made walkable, and an element that walks
+the body (DiameterPushAVP, DiameterPopAVP, DiameterPopStorePushAVP) drops it with
+C<AVP length below its header> or a related reason.
 
 CODE and REQUEST are required. The flags start clear and only the arguments the
 caller names are set: E from ERROR, P from PROXIABLE and T from RETRANSMITED.

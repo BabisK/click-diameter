@@ -23,22 +23,24 @@ enum : uint32_t {
 };
 
 // The hop-by-hop and end-to-end identifiers of one writer element. This is the
-// single place the RFC rule lives, so both writers hand out identifiers the
+// single place the counter rule lives, so both writers hand out identifiers the
 // same way.
 //
 // A peer may read a repeated identifier as a retransmission or a replay (RFC
 // 6733 section 3), and a bare 32-bit draw repeats within a few hundred thousand
 // messages. Each field here is a counter instead: seed() fixes where both
 // sequences start, and every message the element emits advances both by one,
-// so each value repeats only after 2^32 messages of the run. The two fields
-// advance independently, which keeps one message's identifiers distinct.
+// so each value repeats only after 2^32 messages of the run. The two counters
+// keep their seeded offset in a single-threaded run, so one message's
+// identifiers differ.
 //
-// The end-to-end field keeps RFC 6733 section 3's split: its high-order 12 bits
-// are the epoch and its low-order 20 bits count, and a 32-bit increment carries
-// into the epoch exactly when the 20-bit counter wraps. The seed picks the
-// starting epoch, so the field has the RFC's shape without a wall-clock read;
-// that keeps two runs of one seed byte-identical. A new run starts a new
-// sequence from its seed; nothing is claimed across reboots.
+// The end-to-end field is a plain 32-bit counter presented with a twelve/
+// twenty split: its high-order 12 bits advance when the low-order 20 bits wrap,
+// so the field reads like the RFC's shape without a wall-clock read. RFC 6733
+// section 3 only says implementations MAY, upon reboot, put the low-order 12
+// bits of the current time in the high half and a random value in the low half;
+// this counter does neither, and the package makes no across-reboot uniqueness
+// claim. Two runs of one seed stay byte-identical.
 //
 // Both counters are atomic because one element may be fed from several router
 // threads (tests/configs/smp-encap.click does exactly that), and a plain field
@@ -478,6 +480,10 @@ inline DiameterCheck diameter_check_message(const uint8_t *buffer,
 		if (check != DIAMETER_CHECK_OK)
 			return check;
 		const uint32_t paddedLength = (avpLength + 3) & ~3u;
+		// Defence in depth: the header check requires an aligned Length, so
+		// every remainder here is a multiple of 4 and a declared length that
+		// fits always pads within it. Kept so a future caller that walks a
+		// buffer without the header check cannot step past the message.
 		if (paddedLength > length - offset)
 			return DIAMETER_CHECK_AVP_PAST_END;
 		lastAvp = offset;
