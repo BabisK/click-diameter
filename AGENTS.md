@@ -40,3 +40,23 @@ Planning artifacts, the contract, and the defect backlog live in `_bmad-output/`
 - `click-compile` needs `-t userlevel`; `--userlevel` is rejected with "you must specify a driver".
 
 <!-- /bmad:context -->
+
+## FastClick
+
+FastClick 2.1 (`tbarbette/fastclick` `main`) is supported beside upstream Click:
+the same sources build against both, and CI runs the full suite on each. Build
+it with `--enable-userlevel --disable-linuxmodule --enable-user-multithread
+--enable-simtime --disable-verbose-batch`; the last two are FastClick-only.
+`--enable-simtime` compiles in the timewarping that `click --simtime` and the
+`rated-source-timing` test need, and `--disable-verbose-batch` keeps its
+batching advisory out of the byte-exact expectations.
+
+FastClick's `TokenBucket` ticks in microseconds instead of jiffies, so a tick
+count must be converted with `TokenBucket::parameter_type::timestamp()`, never
+cast to `click_jiffies_t`: the cast compiles on both and makes the timer wait
+1000 times too long. `rated-source-timing` pins that interval at 1 ms and is the
+test to run after touching `DiameterRatedSource`'s timer. The elements are not
+batch-compatible, so a batch-enabled FastClick processes them per packet; that
+is a documented limitation, not a defect. CI's `fastclick` job resolves `main`
+to a commit, builds with those flags and runs `CLICK=$HOME/fastclick/bin/click
+bats --tap tests`.

@@ -32,6 +32,36 @@ run, so the test matches them with a regex instead of pinning them, and the
 `encap` test runs its config a second time to check that every other field comes
 back byte for byte.
 
+### FastClick
+
+FastClick 2.1 (`tbarbette/fastclick` `main`) is supported and the same suite runs
+against it. It needs two configure flags beyond the Click recipe, so build it
+and then this package against that prefix:
+
+```bash
+git clone https://github.com/tbarbette/fastclick.git
+cd fastclick
+./configure --prefix="$HOME/fastclick" --enable-userlevel --disable-linuxmodule \
+  --enable-user-multithread --enable-simtime --disable-verbose-batch
+make -j"$(nproc)" && make install
+cd ../click-diameter
+./configure --with-click="$HOME/fastclick" --prefix="$HOME/fastclick"
+make -j"$(nproc)" && make install
+CLICK="$HOME/fastclick/bin/click" bats --tap tests
+```
+
+The `cd ../click-diameter` assumes this package is cloned beside `fastclick`;
+adjust it if yours lives elsewhere. `--enable-simtime` compiles in the clock
+`click --simtime` needs; FastClick leaves timewarping out by default, so without
+the flag Click rejects the option and every simulated-time test fails.
+`--disable-verbose-batch` keeps FastClick's batching advisory out of the output
+the byte-exact tests compare: the nine elements handle one packet per call, so a
+verbose build warns about each of them. `rated-source-timing` is the test that
+pins the fork-specific difference — FastClick's `TokenBucket` ticks in
+microseconds rather than jiffies — and it fails with a 1 s gap on a build that
+casts the tick count instead of converting it through
+`parameter_type::timestamp()`.
+
 `manpages.bats` reads the pages `make install` rendered into the same installed
 prefix. It resolves the prefix from the Click binary — `$CLICK`, or `click` on
 `PATH`, through `readlink -f` and two `dirname`s — and then walks
@@ -115,8 +145,12 @@ degrades. Each test therefore checks the run's exit status, then skips with a
 reason on that warning, and then fails if the run reports a rejected `thread
 preference` — because a config whose `StaticThreadSched` line did not take
 effect runs single threaded and would quietly turn these tests back into shape
-checks. `StaticThreadSched` is load-bearing: delete it and the pre-change
-package passes the two discriminating tests again.
+checks. A run that must carry two-thread coverage sets
+`CLICK_REQUIRE_MULTITHREAD=1`, which turns the skip into a failure; CI sets it on
+both test jobs, so a Click that lost `--enable-user-multithread` fails instead of
+reporting a green suite with no two-thread coverage. `StaticThreadSched` is
+load-bearing: delete it and the pre-change package passes the two discriminating
+tests again.
 
 To run them locally, build a second Click and this package against it:
 
@@ -311,7 +345,10 @@ monthly against the latest Click master, so a local pass over the same Click is
 the same check. CI's Click is built with `--enable-user-multithread`, so the
 five `smp-*` tests run there rather than skipping; the `thread-sanitizer` job
 runs the same script against a sanitizer build, so a local run only reproduces a
-failure.
+failure. A third job, `fastclick`, builds FastClick `main` at a resolved commit
+with the flags above and runs the whole suite against it, so the FastClick
+compatibility claim is checked on every pull request rather than documented
+only.
 
 ## configs/
 
@@ -408,6 +445,7 @@ Behavior that must keep working. Each config has one test in `smoke.bats`:
 | `rated-source-code-too-large.click` | the same `CODE 16777496` rejected by `DiameterRatedSource`, the second writer that shares `setCode()` (A-9) |
 | `rated-source-code-first-too-large.click` | the first illegal `CODE 16777216` (`0x1000000`) rejected by `DiameterRatedSource` (A-9) |
 | `rated-source-code-max.click` | the same inclusive ceiling in a generated 20-octet message: Length 20, code `ffffff` (A-9) |
+| `rated-source-timing.click` | `RATE 1000` under `--simtime`: the burst of 10 tokens covers the first ten messages and the eleventh and twelfth are 1 ms apart, so a timer scheduled in the wrong unit shows a 1 s gap — the FastClick difference that a jiffy cast hides |
 | `randomness-encap.click` | `RandomSeed(SEED 12345)` with `DiameterEncap`: two 24-octet frames, reproduced across runs, identifiers differ (F-11) |
 | `randomness-rated-source.click` | `RandomSeed(SEED 12345)` with `DiameterRatedSource`: two 20-octet frames, reproduced across runs, identifiers differ (F-11) |
 | `randomness-push-avp.click` | `RandomSeed(SEED 12345)` with `DiameterPushAVP(RANDHEXSTRING 8)`: two 36-octet frames, reproduced across runs, values differ (F-11) |
