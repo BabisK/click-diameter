@@ -144,7 +144,12 @@ DiameterRatedSource::run_task(Task *)
 	_task.fast_reschedule();
 	return true;
     } else {
-	_timer.schedule_after(Timestamp::make_jiffies(_tb.time_until_contains(1)));
+	// Convert through the bucket's own parameter type: upstream Click's
+	// TokenBucket ticks in jiffies, FastClick's in microseconds, and only
+	// parameter_type::timestamp() follows whichever unit this build uses. A
+	// cast to click_jiffies_t compiles against both but reads FastClick's
+	// microseconds as jiffies, so the timer would wait 1000 times too long.
+	_timer.schedule_after(TokenBucket::parameter_type::timestamp(_tb.time_until_contains(1)));
 	return false;
     }
 }

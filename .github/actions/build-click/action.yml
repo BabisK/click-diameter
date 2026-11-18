@@ -1,20 +1,37 @@
-name: Build and install Click
+name: Build and install Click or FastClick
 description: >-
-  Restore a cached Click prefix for a commit, build and install it when the
-  cache misses, then save it. The prefix name, cache key and compiler flags are
-  inputs because the ThreadSanitizer job runs the same recipe with
-  instrumentation compiled in.
+  Restore a cached Click or FastClick prefix for a commit, build and install it
+  when the cache misses, then save it. The repository, prefix name, cache key,
+  configure arguments and compiler flags are inputs because the FastClick job
+  builds a different fork with different flags, and the ThreadSanitizer job runs
+  the same recipe with instrumentation compiled in.
 
 inputs:
   sha:
-    description: Click commit to build
+    description: Commit of the Click or FastClick tree to build
     required: true
+  repository:
+    description: Git URL of the Click or FastClick tree to build
+    required: false
+    default: https://github.com/kohler/click.git
   name:
-    description: Prefix directory under the runner's home, such as click or click-tsan
+    description: >-
+      Prefix directory under the runner's home, such as click, click-tsan or
+      fastclick
     required: true
   cache-key:
     description: Cache key for the prefix
     required: true
+  configure-args:
+    description: >-
+      Arguments for the tree's configure script, as plain words. The action
+      supplies --prefix itself, so the value must not repeat it, and it must
+      not contain shell globs or quoting: it is expanded unquoted into the
+      configure command. The default is the upstream Click recipe; FastClick
+      adds --enable-simtime --disable-verbose-batch because its timewarping and
+      batching are configure-time options.
+    required: false
+    default: --enable-userlevel --disable-linuxmodule --enable-user-multithread
   cxxflags:
     description: CXXFLAGS for the Click build; empty for the default build
     required: false
@@ -32,40 +49,45 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Restore the Click install
+    - name: Restore the Click/FastClick install
       id: cache
       uses: actions/cache/restore@v6
       with:
         path: ~/${{ inputs.name }}
         key: ${{ inputs.cache-key }}
 
-    - name: Build and install Click
+    - name: Build and install Click/FastClick
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
       env:
         CLICK_SHA: ${{ inputs.sha }}
+        CLICK_REPOSITORY: ${{ inputs.repository }}
         CLICK_PREFIX_NAME: ${{ inputs.name }}
+        CLICK_CONFIGURE_ARGS: ${{ inputs.configure-args }}
         CXXFLAGS: ${{ inputs.cxxflags }}
         LDFLAGS: ${{ inputs.ldflags }}
       run: |
         prefix="$HOME/$CLICK_PREFIX_NAME"
         git init "$RUNNER_TEMP/click"
         git -C "$RUNNER_TEMP/click" fetch --depth 1 \
-          https://github.com/kohler/click.git "$CLICK_SHA"
+          "$CLICK_REPOSITORY" "$CLICK_SHA"
         git -C "$RUNNER_TEMP/click" checkout --detach FETCH_HEAD
         cd "$RUNNER_TEMP/click"
         # --enable-user-multithread is what makes the five smp-* configs
         # exercise two router threads instead of skipping: a plain userlevel
         # build prints a warning and runs everything on one thread, so the
-        # concurrency tests would silently become shape checks.
-        ./configure --prefix="$prefix" --enable-userlevel --disable-linuxmodule \
-          --enable-user-multithread
+        # concurrency tests would silently become shape checks. It is part of
+        # the default configure-args, so a fork that takes the default gets it
+        # too. CLICK_CONFIGURE_ARGS is deliberately unquoted: the arguments
+        # are words to configure, not one argument.
+        # shellcheck disable=SC2086
+        ./configure --prefix="$prefix" $CLICK_CONFIGURE_ARGS
         make -j"$(nproc)"
         make install
 
     # Saved here, not by the restore action's post step, so a run whose package
-    # build or tests fail still keeps its Click install for the next attempt.
-    - name: Save the Click install
+    # build or tests fail still keeps its install for the next attempt.
+    - name: Save the Click/FastClick install
       if: steps.cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@v6
       with:

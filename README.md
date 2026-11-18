@@ -16,7 +16,9 @@ elements work on whatever packet reaches their input.
 Requirements
 ------------
 
-- Click 2.1 (upstream `kohler/click` master) with the userlevel driver.
+- Click 2.1 (upstream `kohler/click` master) or FastClick 2.1
+  (`tbarbette/fastclick` `main`), with the userlevel driver. FastClick adds two
+  configure flags to the Click recipe; see [FastClick](#fastclick) below.
 - A C++ compiler, `autoconf`, `make` and `perl`. Building Click itself also
   needs `libpcap-dev`; `perl` runs the `click-elem2man` that Click installs,
   which renders the element man pages at install time.
@@ -36,13 +38,17 @@ same place so that `require(diameter)` can find it.
 ```sh
 git clone https://github.com/kohler/click.git
 cd click
-./configure --prefix="$HOME/click" --enable-userlevel --disable-linuxmodule
+./configure --prefix="$HOME/click" --enable-userlevel --disable-linuxmodule \
+  --enable-user-multithread
 make -j"$(nproc)"
 make install
 ```
 
 `--disable-linuxmodule` keeps the build to the userlevel driver, so no kernel
-headers or root privileges are needed.
+headers or root privileges are needed. `--enable-user-multithread` is what makes
+the five `smp-*` tests exercise two router threads; without it those tests
+report a skip, and CI sets `CLICK_REQUIRE_MULTITHREAD=1` so a build that lost
+the flag fails the job instead.
 
 ### 2. Build this package
 
@@ -81,6 +87,41 @@ bats --tap tests                          # or: CLICK=$HOME/click/bin/click bats
 That runs the test suite against an installed package: the smoke configs assert
 exact bytes, and `manpages.bats` asserts the pages `make install` rendered. See
 [tests/README.md](tests/README.md).
+
+### FastClick
+
+[FastClick](https://github.com/tbarbette/fastclick) 2.1 is supported: the same
+package builds against it and passes the same suite. Two of its differences
+matter here. Its `TokenBucket` counts in microseconds rather than jiffies, and
+its timewarping and batching support are configure-time options, so build it
+with the Click recipe plus the two FastClick-specific flags, `--enable-simtime`
+and `--disable-verbose-batch`:
+
+```sh
+git clone https://github.com/tbarbette/fastclick.git
+cd fastclick
+./configure --prefix="$HOME/fastclick" --enable-userlevel --disable-linuxmodule \
+  --enable-user-multithread --enable-simtime --disable-verbose-batch
+make -j"$(nproc)"
+make install
+```
+
+`--enable-simtime` compiles in the clock that `click --simtime` and the
+`rated-source-timing` test need; without it Click rejects the option.
+`--disable-verbose-batch` silences FastClick's batching advisory, which would
+otherwise join the output the byte-exact tests compare. Then build this package
+against that prefix and run the suite, from this package's checkout:
+
+```sh
+./configure --with-click="$HOME/fastclick" --prefix="$HOME/fastclick"
+make -j"$(nproc)"
+make install
+CLICK="$HOME/fastclick/bin/click" bats --tap tests
+```
+
+CI builds FastClick `main` at a resolved commit with those flags and runs the
+whole suite against it on every pull request, so a local pass over the same
+commit is the same check.
 
 Using it
 --------
@@ -240,7 +281,9 @@ name stays `diameter`), every include guard to match its filename, no
 `<iostream>` include, and no `simple_action` beside a `push` override (F-14,
 F-15). It runs on its own with `bats tests/identity.bats`. CI runs the same
 command on every pull request and every push to `master`, plus a monthly check
-against the latest Click master.
+against the latest Click master; a second job builds FastClick `main` at a
+resolved commit and runs the same suite against it, so the compatibility claim
+is verified rather than stated.
 
 Malformed input is dropped, never forwarded. The six elements that read a
 received frame — `DiameterDecap`, `DiameterAvpDecap`, `DiameterFlipRequest`,
@@ -336,7 +379,7 @@ distinct values.
 Known limitations
 -----------------
 
-One open item remains outside this branch: the upstream Click fork
+Two limitations remain. The first is outside this branch: the upstream Click fork
 `BabisK/click`, which still carries `conf/test.click`, which does not configure,
 and `etc/diameter/`, a stale in-tree copy of these elements (F-16; `findings.md`
 records the fork under its former name, `babisk/diameter`). The fork's removal is
@@ -346,6 +389,17 @@ include guards, the `<iostream>` includes in data-path elements and the dead
 `simple_action()` beside `push()` (F-15) are fixed, and `tests/identity.bats`
 pins them. The symptom evidence for all three stays in
 `_bmad-output/specs/spec-diameter-package-hardening/findings.md`.
+
+The second is FastClick's batching, which does not apply to these elements. They
+are ordinary `Element`s that read and write one packet per call, so a
+batch-enabled FastClick build processes their traffic packet by packet; that is
+correct, only slower, and unless the build is configured with
+`--disable-verbose-batch` FastClick warns about it beside the output.
+`--enable-auto-batch=port` is FastClick's own option for making vanilla elements
+batch-compatible automatically, if that warning or the per-packet path matters
+for a deployment. Neither flag changes a byte the elements emit, which is why CI
+builds with `--disable-verbose-batch` and the suite pins the same frames on both
+routers.
 
 Layout
 ------

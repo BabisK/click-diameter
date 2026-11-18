@@ -25,9 +25,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Both jobs build Click from the same commit, so the commit is resolved once
+  # The two Click jobs build the same commit, so the commit is resolved once
   # here instead of twice, and a network problem fails this job once rather
-  # than in each of them.
+  # than in each of them. FastClick is a different fork on a different branch,
+  # so it gets its own resolver below.
   resolve-click:
     name: Resolve the Click master commit
     runs-on: ubuntu-26.04
@@ -53,6 +54,34 @@ jobs:
           echo "could not resolve Click master after 3 attempts" >&2
           exit 1
 
+  # FastClick's default branch is `main`, not `master`, and its head moves
+  # independently of upstream Click. Resolving it to a SHA keeps the cache key
+  # meaningful and names the commit a failure was built from.
+  resolve-fastclick:
+    name: Resolve the FastClick main commit
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - name: Resolve FastClick main to a commit
+        id: resolve
+        run: |
+          for attempt in 1 2 3; do
+            sha=$(git ls-remote https://github.com/tbarbette/fastclick.git \
+              refs/heads/main | cut -f1 || true)
+            if [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "sha=$sha" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "attempt $attempt: FastClick main did not resolve to a SHA (got '${sha:-nothing}')" >&2
+            if [ "$attempt" -lt 3 ]; then
+              sleep $((attempt * 5))
+            fi
+          done
+          echo "could not resolve FastClick main after 3 attempts" >&2
+          exit 1
+
   build-and-test:
     name: Build and test the package
     needs: resolve-click
@@ -66,7 +95,7 @@ jobs:
         id: deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential autoconf libpcap-dev bats
+          sudo apt-get install -y build-essential autoconf libpcap-dev bats perl
 
       # The package is installed into the same prefix as Click, so
       # `require(diameter)` resolves. Bump the `v2` in this key whenever the
@@ -90,6 +119,10 @@ jobs:
 
       - name: Run the smoke configs
         id: tests
+        env:
+          # The five smp-* configs must really use two threads: a Click that
+          # lost --enable-user-multithread fails the job instead of skipping.
+          CLICK_REQUIRE_MULTITHREAD: 1
         run: CLICK="$HOME/click/bin/click" bats --tap tests
 
       # A red run should say which stage failed and what it built, because an
@@ -149,6 +182,128 @@ jobs:
             echo "| Click commit | \`${CLICK_SHA:-not resolved}\` |"
             echo "| Click cache | \`$cache_state\` |"
             echo "| Click binary | \`$click_version\` |"
+            echo "| Toolchain | \`$(version_of gcc)\` / \`$(version_of autoconf)\` / \`$(version_of make)\` |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+  # The package targets upstream Click, but FastClick 2.1 is a drop-in fork
+  # with one difference the build has to prove: its TokenBucket counts in
+  # microseconds rather than jiffies, which broke DiameterRatedSource's timer.
+  # --enable-simtime is a FastClick configure option (upstream always compiles
+  # timewarping in), and the timing test needs it; --disable-verbose-batch
+  # keeps FastClick's batching advisory out of the byte-exact expectations.
+  # FASTCLICK_CONFIGURE_ARGS is the one place the flags are written: the
+  # fingerprint step hashes it into the cache key, so changing a flag cannot
+  # restore a prefix built with the old ones, and the action receives the same
+  # value.
+  fastclick:
+    name: Build and test against FastClick
+    needs: resolve-fastclick
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    env:
+      FASTCLICK_CONFIGURE_ARGS: >-
+        --enable-userlevel --disable-linuxmodule --enable-user-multithread
+        --enable-simtime --disable-verbose-batch
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Install build dependencies
+        id: deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential autoconf libpcap-dev bats perl
+
+      # A cache entry is only reusable for the exact configure invocation that
+      # produced it, so the flags are folded into the key beside the commit.
+      - name: Fingerprint the FastClick configure arguments
+        id: fastclick-config
+        run: |
+          hash=$(printf '%s' "$FASTCLICK_CONFIGURE_ARGS" \
+            | sha256sum | cut -c1-12)
+          echo "hash=$hash" >> "$GITHUB_OUTPUT"
+
+      # FastClick's configure takes its own batching and simulated-time
+      # switches, so it passes configure-args rather than the upstream default.
+      - name: Build and install FastClick
+        id: fastclick-build
+        uses: ./.github/actions/build-click
+        with:
+          sha: ${{ needs.resolve-fastclick.outputs.sha }}
+          repository: https://github.com/tbarbette/fastclick.git
+          name: fastclick
+          cache-key: fastclick-${{ runner.os }}-v1-${{ steps.fastclick-config.outputs.hash }}-${{ needs.resolve-fastclick.outputs.sha }}
+          configure-args: ${{ env.FASTCLICK_CONFIGURE_ARGS }}
+
+      - name: Build and install the package
+        id: package
+        run: |
+          autoconf
+          ./configure --with-click="$HOME/fastclick" --prefix="$HOME/fastclick"
+          make -j"$(nproc)"
+          make install
+
+      - name: Run the smoke configs
+        id: tests
+        env:
+          CLICK_REQUIRE_MULTITHREAD: 1
+        run: CLICK="$HOME/fastclick/bin/click" bats --tap tests
+
+      # The same reasoning as the upstream job's summary, plus the FastClick
+      # commit: a red run has to say whether FastClick moved, the package
+      # broke, or the fork's configure flags stopped working.
+      - name: Diagnose the failure
+        if: failure()
+        env:
+          FASTCLICK_SHA: ${{ needs.resolve-fastclick.outputs.sha }}
+          FASTCLICK_CACHE_HIT: ${{ steps.fastclick-build.outputs.cache-hit }}
+          DEPS_OUTCOME: ${{ steps.deps.outcome }}
+          FASTCLICK_BUILD_OUTCOME: ${{ steps.fastclick-build.outcome }}
+          PACKAGE_OUTCOME: ${{ steps.package.outcome }}
+          TESTS_OUTCOME: ${{ steps.tests.outcome }}
+        run: |
+          failed=""
+          for stage in "dependencies:$DEPS_OUTCOME" \
+            "fastclick-build:$FASTCLICK_BUILD_OUTCOME" \
+            "package:$PACKAGE_OUTCOME" "tests:$TESTS_OUTCOME"; do
+            name=${stage%%:*}
+            outcome=${stage#*:}
+            if [ "$outcome" = failure ]; then
+              failed="$failed $name"
+            fi
+          done
+          failed=${failed# }
+          [ -n "$failed" ] || failed="unknown (the job was cancelled or timed out)"
+
+          fastclick_version="not installed"
+          if [ -x "$HOME/fastclick/bin/click" ]; then
+            fastclick_version=$("$HOME/fastclick/bin/click" --version 2>&1 | head -1)
+          fi
+
+          cache_state="miss"
+          if [ "$FASTCLICK_CACHE_HIT" = true ]; then
+            cache_state="hit"
+          fi
+
+          version_of() {
+            if command -v "$1" >/dev/null 2>&1; then
+              "$1" --version 2>/dev/null | head -1
+            else
+              echo "not installed"
+            fi
+          }
+
+          {
+            echo "### FastClick build and test failed"
+            echo
+            echo "| Detail | Value |"
+            echo "| --- | --- |"
+            echo "| Failing stage | $failed |"
+            echo "| Event | \`$GITHUB_EVENT_NAME\` |"
+            echo "| Ref | \`$GITHUB_REF\` |"
+            echo "| FastClick commit | \`${FASTCLICK_SHA:-not resolved}\` |"
+            echo "| FastClick cache | \`$cache_state\` |"
+            echo "| FastClick binary | \`$fastclick_version\` |"
             echo "| Toolchain | \`$(version_of gcc)\` / \`$(version_of autoconf)\` / \`$(version_of make)\` |"
           } | tee -a "$GITHUB_STEP_SUMMARY"
 

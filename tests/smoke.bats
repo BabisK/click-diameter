@@ -67,7 +67,10 @@
 # range and prints ffffff, so an off-by-one guard fails there. The push-avp
 # length pair pins the three-octet Message Length ceiling from both sides: an
 # append one 4-octet step past it is dropped with its own warning, while the
-# largest legal message still appends. The smp-* tests are
+# largest legal message still appends. `rated-source-timing` pins the unit the
+# token bucket's refill timer is scheduled in: the two messages after the burst
+# are 1 ms apart on either build, and a cast-only conversion reads FastClick's
+# microseconds as jiffies and makes that a second. The smp-* tests are
 # the ones run under `click -j 2`, with StaticThreadSched putting two producers
 # on two router threads: the Encap and AvpEncap frames derive their Length from
 # the packet, so a cross-thread write leaves the declared Length disagreeing
@@ -127,12 +130,19 @@ run_click_threads() {
 # A Click built without --enable-user-multithread warns and then runs one
 # thread, so there is no race to exercise and the test skips; check the run's
 # status first so a config that failed for another reason cannot be skipped.
-# A Click that runs but rejects the config's thread preference has not put the
-# producers on two threads either, and that is a failure: it would silently
-# turn the discriminating tests back into shape checks.
+# A run that must carry two-thread coverage sets CLICK_REQUIRE_MULTITHREAD=1 --
+# CI does -- and then a single-threaded build is a failure instead of a skip,
+# because a green run without those five tests would claim coverage it never
+# had. A Click that runs but rejects the config's thread preference has not put
+# the producers on two threads either, and that is always a failure: it would
+# silently turn the discriminating tests back into shape checks.
 smp_skip_or_fail() {
 	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
 	if grep -qF 'Click was built without multithread support, running single threaded' <<<"$output"; then
+		if [ "${CLICK_REQUIRE_MULTITHREAD:-0}" = 1 ]; then
+			echo "CLICK_REQUIRE_MULTITHREAD=1 but this Click was built without multithread support"
+			return 1
+		fi
 		skip "this Click was built without multithread support"
 	fi
 	if grep -qF 'thread preference' <<<"$output"; then
@@ -1107,6 +1117,51 @@ pop: +28 \| 0100001c 80000118 00000000 [0-9a-f]{8} [0-9a-f]{8} 00000108 00000008
 	# ffffff, so the guard must be > rather than >=.
 	local expected='^rated-source-code-max: +20 \| 01000014 80ffffff 0000002a [0-9a-f]{8} [0-9a-f]{8}$'
 	[[ "$output" =~ $expected ]] || { echo "expected: 20 octets, Length 20, flags 80, code ffffff"; return 1; }
+}
+
+@test "rated-source-timing: the refill timer waits 1 ms in the bucket's own unit" {
+	local out="$BATS_TEST_TMPDIR/rated-source-timing"
+	run_click_simtime rated-source-timing.click "$out"
+	[ "$status" -eq 0 ] || { echo "click exit $status"; return 1; }
+	# Print(TIMESTAMP true) renders "timing: SEC.SUBSEC:   20 | ...". The burst
+	# is rate < 200 ? 2 : rate / 100, so RATE 1000 gives 10 tokens: the first
+	# ten messages leave within a few nanoseconds of each other, and the
+	# eleventh and twelfth each wait one tick for a token. The bucket ticks at
+	# 1 ms in both builds -- jiffies at the default CLICK_HZ upstream,
+	# microseconds in FastClick -- so the two intervals after the burst must
+	# each fall in [0.5 ms, 5 ms]. A cast-only conversion reads FastClick's
+	# microseconds as jiffies and schedules the timer 1 s out, and the window
+	# rejects that as it rejects a zero interval.
+	local frames gaps
+	frames=$(grep -c '^timing:' "$out" || true)
+	[ "$frames" -eq 12 ] || { echo "expected 12 timing lines, got $frames"; return 1; }
+	gaps=$(awk '
+		/^timing:/ {
+			ts = $2
+			sub(/:$/, "", ts)
+			split(ts, part, ".")
+			sec[++n] = part[1] + 0
+			frac[n] = part[2] + 0
+			digits = length(part[2])
+		}
+		END {
+			# The two post-burst intervals: frames 10 to 11 and 11 to 12.
+			# Splitting seconds from subseconds keeps the subtraction exact;
+			# the epoch itself is far past the exact integer range of a double.
+			scale = 1
+			for (i = 0; i < digits; i++) scale *= 10
+			for (i = 10; i <= 11; i++)
+				printf "%.9f\n", (sec[i + 1] - sec[i]) + (frac[i + 1] - frac[i]) / scale
+		}' "$out")
+	local gap count=0
+	while IFS= read -r gap; do
+		awk -v gap="$gap" 'BEGIN { exit !(gap >= 0.0005 && gap <= 0.005) }' || {
+			echo "expected a 1 ms refill interval, got ${gap}s"
+			return 1
+		}
+		count=$((count + 1))
+	done <<<"$gaps"
+	[ "$count" -eq 2 ] || { echo "expected two intervals, got $count"; return 1; }
 }
 
 @test "randomness-encap: RandomSeed reproduces the identifiers across runs" {
